@@ -228,6 +228,86 @@ organize:
   # the wrong filename.
   rename_in_place: true
 
+# ---------------------------------------------------------------------------
+# Sidecar files (subtitles and other companions)
+# ---------------------------------------------------------------------------
+#
+# A sidecar shares its video's name:
+#
+#     clip_1080p.mp4
+#     clip_1080p.en.srt
+#     clip_1080p.es.srt
+#
+# Stash does NOT index subtitles as files. It looks next to each video at
+# scan time and attaches what it finds as a property of the scene, so a
+# caption has no file ID — and Stash's moveFiles mutation takes file IDs.
+# That means moveFiles physically cannot carry a subtitle, and any video
+# organize moves would leave its subtitles behind, silently detaching the
+# captions from the scene.
+#
+# So stash-janitor moves them itself. This is the ONLY part of the tool that
+# touches the filesystem, and it needs to actually reach the library.
+#
+# Verify your setup with:  stash-janitor sidecars check
+sidecars:
+  enabled: true
+
+  # Companion types that follow a video. Language suffixes are preserved,
+  # so clip.en.srt becomes <newname>.en.srt and multi-language keeps working.
+  extensions: [srt, ass, ssa, vtt, sub, idx, smi]
+
+  # How to reach the files:
+  #   auto  — ssh when sidecars.ssh.host is set, otherwise local (default)
+  #   local — this machine's filesystem (a mount, a mapped drive, or the NAS itself)
+  #   ssh   — over SFTP, for when the library is not mounted here
+  #   off   — disable sidecar handling
+  access: auto
+
+  # Stash reports paths as seen from inside its own process — usually
+  # /data/... in a Docker deployment. Map those onto paths reachable from
+  # wherever stash-janitor runs. Longest matching prefix wins.
+  #
+  # Leave empty ONLY if stash-janitor runs on the same filesystem as Stash.
+  path_map: []
+  #
+  # Running on the NAS itself:
+  # path_map:
+  #   - stash: /data
+  #     local: /share/main/Videos
+  #
+  # Linux workstation with the share mounted:
+  # path_map:
+  #   - stash: /data
+  #     local: /mnt/nas/Videos
+  #
+  # Windows mapped drive (or a UNC path like \\nas\main\Videos):
+  # path_map:
+  #   - stash: /data
+  #     local: 'Z:\Videos'
+
+  # Only used when access resolves to ssh.
+  ssh:
+    host: ""
+    port: 22
+    user: ""
+
+    # Private key path. Leave empty to use ssh-agent, then the usual
+    # ~/.ssh/id_ed25519, id_rsa, id_ecdsa.
+    key_file: ""
+
+    # Secrets are read from the environment, never stored in this file —
+    # same convention as stash.api_key_env. Prefer a key or the agent.
+    passphrase_env: ""
+    password_env: ""
+
+    # Defaults to ~/.ssh/known_hosts.
+    known_hosts_file: ""
+
+    # Trust an unknown host on first contact (like StrictHostKeyChecking=
+    # accept-new). A CHANGED key on an already-known host is always
+    # rejected, whatever this is set to.
+    accept_new_host_key: false
+
 merge:
   # Policy for computing the metadata union before calling sceneMerge.
   # Stash's sceneMerge does NOT auto-union scene-level metadata in v0.31.0

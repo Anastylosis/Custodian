@@ -38,19 +38,68 @@ type Config struct {
 	Apply                Apply                `yaml:"apply"`
 	Orphans              OrphansConfig        `yaml:"orphans"`
 	Organize             OrganizeConfig       `yaml:"organize"`
+	Sidecars             SidecarsConfig       `yaml:"sidecars"`
 	StashBoxFingerprints StashBoxFingerprints `yaml:"stash_box_fingerprints"`
 	Merge                Merge                `yaml:"merge"`
 }
 
+// SidecarsConfig controls whether companion files (subtitles, and anything
+// else sharing a video's stem) travel with the video when organize moves or
+// renames it.
+//
+// This is the one part of stash-janitor that touches the filesystem directly.
+// It has to: Stash does not index subtitles as files, so they have no file ID
+// and its moveFiles mutation cannot move them. See MANUAL.md, "Sidecar files".
+type SidecarsConfig struct {
+	Enabled bool `yaml:"enabled"`
+
+	// Extensions are the companion file types that follow a video.
+	Extensions []string `yaml:"extensions"`
+
+	// Access selects the backend: auto, local, ssh or off.
+	// auto picks ssh when sidecars.ssh.host is set, otherwise local.
+	Access string `yaml:"access"`
+
+	// PathMap translates the paths Stash reports into paths reachable from
+	// wherever stash-janitor runs. Required whenever those differ — which is
+	// most Docker deployments, where Stash reports /data.
+	PathMap []PathMapRule `yaml:"path_map"`
+
+	SSH SidecarSSHConfig `yaml:"ssh"`
+}
+
+// PathMapRule maps one Stash-visible prefix to a locally reachable one.
+type PathMapRule struct {
+	Stash string `yaml:"stash"`
+	Local string `yaml:"local"`
+}
+
+// SidecarSSHConfig describes how to reach the machine holding the library
+// when it is not mounted locally.
+type SidecarSSHConfig struct {
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+	User string `yaml:"user"`
+
+	KeyFile        string `yaml:"key_file"`
+	PassphraseEnv  string `yaml:"passphrase_env"`
+	PasswordEnv    string `yaml:"password_env"`
+	KnownHostsFile string `yaml:"known_hosts_file"`
+
+	// AcceptNewHostKey trusts an unknown host on first contact. A changed key
+	// on an already-known host is always rejected regardless of this setting.
+	AcceptNewHostKey bool `yaml:"accept_new_host_key"`
+}
+
 type OrganizeConfig struct {
-	BaseDir                  string   `yaml:"base_dir"`
-	PathTemplate             string   `yaml:"path_template"`
-	SpaceChar                string   `yaml:"space_char"`
-	FolderSpaceChar          string   `yaml:"folder_space_char"`
-	PerformerStrategy        string   `yaml:"performer_strategy"`
-	MaxPerformersInFilename  int      `yaml:"max_performers_in_filename"`
-	RequiredFields           []string `yaml:"required_fields"`
-	RenameInPlace            bool     `yaml:"rename_in_place"`
+	BaseDir                 string   `yaml:"base_dir"`
+	PathTemplate            string   `yaml:"path_template"`
+	SpaceChar               string   `yaml:"space_char"`
+	FolderSpaceChar         string   `yaml:"folder_space_char"`
+	PerformerStrategy       string   `yaml:"performer_strategy"`
+	MaxPerformersInFilename int      `yaml:"max_performers_in_filename"`
+	RequiredFields          []string `yaml:"required_fields"`
+	RenameInPlace           bool     `yaml:"rename_in_place"`
 }
 
 type OrphansConfig struct {
@@ -61,8 +110,8 @@ type OrphansConfig struct {
 }
 
 type Stash struct {
-	URL        string `yaml:"url"`
-	APIKeyEnv  string `yaml:"api_key_env"`
+	URL       string `yaml:"url"`
+	APIKeyEnv string `yaml:"api_key_env"`
 }
 
 type Scan struct {
@@ -117,9 +166,9 @@ type StashBoxFingerprints struct {
 }
 
 type Merge struct {
-	SceneLevel            map[string]string     `yaml:"scene_level"`
-	History               MergeHistory          `yaml:"history"`
-	PostMergeFileCleanup  PostMergeFileCleanup  `yaml:"post_merge_file_cleanup"`
+	SceneLevel           map[string]string    `yaml:"scene_level"`
+	History              MergeHistory         `yaml:"history"`
+	PostMergeFileCleanup PostMergeFileCleanup `yaml:"post_merge_file_cleanup"`
 }
 
 type MergeHistory struct {
