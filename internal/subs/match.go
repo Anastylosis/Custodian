@@ -36,8 +36,12 @@ type SceneRef struct {
 	// this subtitle's language; used to avoid proposing a duplicate.
 	HasCaption bool
 
-	tokens map[string]bool
-	codes  map[string]bool
+	// tokens is every meaningful word; content and creator are that set split
+	// by the library's creator vocabulary.
+	tokens  map[string]bool
+	content map[string]bool
+	creator map[string]bool
+	codes   map[string]bool
 }
 
 // Subtitle is one loose subtitle file to place.
@@ -84,6 +88,7 @@ type Index struct {
 	scenes  []SceneRef
 	byCode  map[string][]int
 	byToken map[string][]int
+	vocab   *Vocab
 }
 
 // tokenDFCap ignores tokens appearing in more scenes than this: words like
@@ -92,17 +97,23 @@ type Index struct {
 const tokenDFCap = 4000
 
 // NewIndex preprocesses scenes for matching.
-func NewIndex(scenes []SceneRef) *Index {
+//
+// vocab may be nil, in which case every token counts as content — matching
+// still works, it just loses the ability to tell "same creator" apart from
+// "same scene".
+func NewIndex(scenes []SceneRef, vocab *Vocab) *Index {
 	idx := &Index{
 		scenes:  make([]SceneRef, len(scenes)),
 		byCode:  map[string][]int{},
 		byToken: map[string][]int{},
+		vocab:   vocab,
 	}
 	copy(idx.scenes, scenes)
 	for i := range idx.scenes {
 		s := &idx.scenes[i]
 		blob := strings.Join(append([]string{s.Stem, s.Title, s.Studio}, s.Performers...), " ")
 		s.tokens = Tokens(blob)
+		s.content, s.creator = vocab.Split(s.tokens)
 		s.codes = Codes(blob)
 		for c := range s.codes {
 			idx.byCode[c] = append(idx.byCode[c], i)
@@ -133,6 +144,7 @@ func (ix *Index) Match(sub Subtitle, maxCandidates int) Match {
 		maxCandidates = 5
 	}
 	subTokens := Tokens(sub.Stem)
+	subContent, subCreator := ix.vocab.Split(subTokens)
 	subCodes := Codes(sub.Stem)
 	subStemNorm := normKey(sub.Stem)
 
@@ -170,7 +182,10 @@ func (ix *Index) Match(sub Subtitle, maxCandidates int) Match {
 			continue
 		}
 		sc := &ix.scenes[i]
-		sim := F1(subTokens, sc.tokens)
+		// Title similarity deliberately ignores creator words. Two clips by
+		// one creator share those regardless of content, so counting them
+		// here would make every clip by that creator look alike.
+		sim := F1(subContent, sc.content)
 		if sim < 0.2 && !hasCandidate(scores, i) {
 			continue
 		}
@@ -178,6 +193,14 @@ func (ix *Index) Match(sub Subtitle, maxCandidates int) Match {
 		c.Score += 70 * sim
 		if sim > 0 {
 			c.Reasons = append(c.Reasons, "title "+pct(sim))
+		}
+		// Creator agreement is real but weak evidence: it narrows the field
+		// without ever deciding on its own.
+		if len(subCreator) > 0 && len(sc.creator) > 0 {
+			if Overlap(subCreator, sc.creator) > 0 {
+				c.Score += 20
+				c.Reasons = append(c.Reasons, "creator")
+			}
 		}
 	}
 

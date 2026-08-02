@@ -9,8 +9,8 @@
 // Matching them back is harder than string comparison, because the two names
 // often share almost nothing. These are real pairs from a live library:
 //
-//	StudioHandleXXX_Mommy-and-Son-Breeding-Season+(transcribed+on+25-Jul-2024).srt
-//	  → 2023-05-23_Some.Performer-stepMommy.and.stepSon.Breeding.Season_1080p.mp4
+//	StudioHandleXXX_Mommy-and-Son-Nesting-Season+(transcribed+on+25-Jul-2024).srt
+//	  → 2023-05-23_Some.Performer-stepMommy.and.stepSon.Nesting.Season_1080p.mp4
 //
 //	thehousenextdoor2024 - The Reluctant Dog Sitter - Compressed.srt
 //	  → The-Reluctant-Pet-Sitter-Part-1.mp4
@@ -63,15 +63,6 @@ var stopWords = map[string]bool{
 	"you": true, "my": true, "me": true, "of": true, "to": true, "in": true,
 	"on": true, "for": true, "is": true, "it": true, "at": true, "by": true,
 	"from": true, "s": true, "t": true, "part": true, "pt": true, "vol": true,
-}
-
-// handleWords are channel/studio handles that appear in a subtitle filename but
-// not in the scene title. Dropping them stops two unrelated clips from the same
-// creator scoring as a match on the handle alone.
-var handleWords = map[string]bool{
-	"thehousenextdoor1": true, "thehousenextdoor2024": true,
-	"studiohandlexxx": true, "somehandle": true, "sweethandle": true,
-	"studioname26": true, "somehandle": true,
 }
 
 // synonyms fold the vocabulary that differs between a subtitle's name and the
@@ -146,7 +137,7 @@ func Tokens(s string) map[string]bool {
 	s = nonAlnumRe.ReplaceAllString(s, " ")
 	out := map[string]bool{}
 	for _, w := range strings.Fields(strings.ToLower(s)) {
-		if len(w) < 2 || stopWords[w] || handleWords[w] {
+		if len(w) < 2 || stopWords[w] {
 			continue
 		}
 		if isAllDigits(w) {

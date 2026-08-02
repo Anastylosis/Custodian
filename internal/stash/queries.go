@@ -275,19 +275,19 @@ type SceneMergeInput struct {
 // engine populates. Pointer fields let us distinguish "leave unchanged"
 // (nil) from "set to empty value" (non-nil pointer to zero value).
 type SceneUpdateVals struct {
-	Title         *string  `json:"title,omitempty"`
-	Code          *string  `json:"code,omitempty"`
-	Details       *string  `json:"details,omitempty"`
-	Director      *string  `json:"director,omitempty"`
-	URLs          []string `json:"urls,omitempty"`
-	Date          *string  `json:"date,omitempty"`
-	Rating100     *int     `json:"rating100,omitempty"`
-	Organized     *bool    `json:"organized,omitempty"`
-	StudioID      *string  `json:"studio_id,omitempty"`
-	GalleryIDs    []string `json:"gallery_ids,omitempty"`
-	PerformerIDs  []string `json:"performer_ids,omitempty"`
-	TagIDs        []string `json:"tag_ids,omitempty"`
-	StashIDs      []StashIDInput `json:"stash_ids,omitempty"`
+	Title        *string        `json:"title,omitempty"`
+	Code         *string        `json:"code,omitempty"`
+	Details      *string        `json:"details,omitempty"`
+	Director     *string        `json:"director,omitempty"`
+	URLs         []string       `json:"urls,omitempty"`
+	Date         *string        `json:"date,omitempty"`
+	Rating100    *int           `json:"rating100,omitempty"`
+	Organized    *bool          `json:"organized,omitempty"`
+	StudioID     *string        `json:"studio_id,omitempty"`
+	GalleryIDs   []string       `json:"gallery_ids,omitempty"`
+	PerformerIDs []string       `json:"performer_ids,omitempty"`
+	TagIDs       []string       `json:"tag_ids,omitempty"`
+	StashIDs     []StashIDInput `json:"stash_ids,omitempty"`
 }
 
 // StashIDInput mirrors Stash's StashIDInput shape (used by sceneUpdate and
@@ -695,4 +695,91 @@ func (c *Client) Version(ctx context.Context) (string, string, error) {
 		return "", "", err
 	}
 	return resp.Version.Version, resp.Version.BuildTime, nil
+}
+
+// ============================================================================
+// creator vocabulary — performer and studio names, used by `subs` matching
+// ============================================================================
+
+const findPerformerNamesQuery = `
+query FindPerformerNames($page: Int!, $per_page: Int!) {
+  findPerformers(filter: {page: $page, per_page: $per_page, sort: "id", direction: ASC}) {
+    count
+    performers { name alias_list }
+  }
+}
+`
+
+const findStudioNamesQuery = `
+query FindStudioNames($page: Int!, $per_page: Int!) {
+  findStudios(filter: {page: $page, per_page: $per_page, sort: "id", direction: ASC}) {
+    count
+    studios { name aliases }
+  }
+}
+`
+
+// CreatorNames returns every performer and studio name in the library, plus
+// their aliases.
+//
+// Subtitle matching uses these to tell "who made this" apart from "what it is
+// called". Deriving the list from Stash rather than hard-coding it means it
+// covers the whole library, stays correct as the library grows, and keeps
+// personal names out of committed source.
+func (c *Client) CreatorNames(ctx context.Context) ([]string, error) {
+	const perPage = 1000
+	var out []string
+
+	for page := 1; ; page++ {
+		var resp struct {
+			FindPerformers struct {
+				Count      int `json:"count"`
+				Performers []struct {
+					Name      string   `json:"name"`
+					AliasList []string `json:"alias_list"`
+				} `json:"performers"`
+			} `json:"findPerformers"`
+		}
+		vars := map[string]any{"page": page, "per_page": perPage}
+		if err := c.Execute(ctx, findPerformerNamesQuery, vars, &resp); err != nil {
+			return nil, fmt.Errorf("findPerformers(page=%d): %w", page, err)
+		}
+		if len(resp.FindPerformers.Performers) == 0 {
+			break
+		}
+		for _, p := range resp.FindPerformers.Performers {
+			out = append(out, p.Name)
+			out = append(out, p.AliasList...)
+		}
+		if page*perPage >= resp.FindPerformers.Count {
+			break
+		}
+	}
+
+	for page := 1; ; page++ {
+		var resp struct {
+			FindStudios struct {
+				Count   int `json:"count"`
+				Studios []struct {
+					Name    string   `json:"name"`
+					Aliases []string `json:"aliases"`
+				} `json:"studios"`
+			} `json:"findStudios"`
+		}
+		vars := map[string]any{"page": page, "per_page": perPage}
+		if err := c.Execute(ctx, findStudioNamesQuery, vars, &resp); err != nil {
+			return nil, fmt.Errorf("findStudios(page=%d): %w", page, err)
+		}
+		if len(resp.FindStudios.Studios) == 0 {
+			break
+		}
+		for _, s := range resp.FindStudios.Studios {
+			out = append(out, s.Name)
+			out = append(out, s.Aliases...)
+		}
+		if page*perPage >= resp.FindStudios.Count {
+			break
+		}
+	}
+	return out, nil
 }

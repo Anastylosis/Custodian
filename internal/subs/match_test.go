@@ -6,6 +6,17 @@ import (
 	"time"
 )
 
+// testVocab mimics what CreatorNames returns from a live library: performer
+// and studio names plus aliases, including an alias that is also an ordinary
+// English word — the case that makes blanket-dropping creator words unsafe.
+func testVocab() *Vocab {
+	return NewVocab([]string{
+		"River Stone", "RiverStone", "Quinn Marsh", "Hana Kirsawa",
+		"Wren Ashby", "Sable Vance", "thehousenextdoor",
+		"Molly", // a real alias that is also a common given name
+	})
+}
+
 func mins(m, s int) time.Duration {
 	return time.Duration(m)*time.Minute + time.Duration(s)*time.Second
 }
@@ -86,8 +97,8 @@ func keys(m map[string]bool) []string {
 // "stepMommy" must fold to "mommy" -> "mom". Missing this caused two real
 // matches to be reported as unmatched.
 func TestTokens_FoldsStepPrefix(t *testing.T) {
-	a := Tokens("StudioHandleXXX_Mommy-and-Son-Breeding-Season")
-	b := Tokens("2023-05-23_Some.Performer-stepMommy.and.stepSon.Breeding.Season_1080p")
+	a := Tokens("RiverStoneXXX_Mommy-and-Son-Nesting-Season")
+	b := Tokens("2023-05-23_River.Stone-stepMommy.and.stepSon.Nesting.Season_1080p")
 	if !a["mom"] || !b["mom"] {
 		t.Fatalf("step prefix not folded: a=%v b=%v", keys(a), keys(b))
 	}
@@ -99,15 +110,15 @@ func TestTokens_FoldsStepPrefix(t *testing.T) {
 // The regression that started this: names barely overlap, runtime decides.
 func TestMatch_BreedingSeason(t *testing.T) {
 	ix := NewIndex([]SceneRef{
-		scene("54548", "2023-05-23_Some.Performer-stepMommy.and.stepSon.Breeding.Season_1080p",
-			"stepMommy and stepSon Breeding Season", mins(23, 52), "Some Performer"),
-		scene("73661", "Quinn Marsh - Mommy & Son Go Live (Extreme Taboo Breeding) (x265)",
+		scene("54548", "2023-05-23_River.Stone-stepMommy.and.stepSon.Nesting.Season_1080p",
+			"stepMommy and stepSon Nesting Season", mins(23, 52), "River Stone"),
+		scene("73661", "Quinn Marsh - Mommy & Son Go Live (Extreme Taboo Nesting) (x265)",
 			"", mins(31, 51), "Quinn Marsh"),
-		scene("73662", "Quinn Marsh - Mommy & Son Storm Breeding (x265)",
+		scene("73662", "Quinn Marsh - Mommy & Son Storm Nesting (x265)",
 			"", mins(20, 59), "Quinn Marsh"),
-	})
+	}, testVocab())
 	m := ix.Match(Subtitle{
-		Stem:    "StudioHandleXXX_Mommy-and-Son-Breeding-Season+(transcribed+on+25-Jul-2024+00-23-01)",
+		Stem:    "RiverStoneXXX_Mommy-and-Son-Nesting-Season+(transcribed+on+25-Jul-2024+00-23-01)",
 		Runtime: mins(23, 45),
 	}, 5)
 
@@ -123,11 +134,11 @@ func TestMatch_BreedingSeason(t *testing.T) {
 // A same-titled decoy 23 minutes away must lose to the one 2 seconds away.
 func TestMatch_RuntimeSeparatesIdenticalTitles(t *testing.T) {
 	ix := NewIndex([]SceneRef{
-		scene("55739", "2022-10-13_Some.Performer-Nurse.River.Soothes.The.Aching.Patient_1080p",
-			"Nurse River Soothes The Aching Patient", mins(10, 54), "Some Performer"),
-		scene("75175", "2022-10-13_Some.Performer-Nurse.River.Soothes.The.Aching.Patient_1080p_1",
-			"Nurse River Soothes The Aching Patient", mins(33, 49), "Some Performer"),
-	})
+		scene("55739", "2022-10-13_River.Stone-Nurse.River.Soothes.The.Aching.Patient_1080p",
+			"Nurse River Soothes The Aching Patient", mins(10, 54), "River Stone"),
+		scene("75175", "2022-10-13_River.Stone-Nurse.River.Soothes.The.Aching.Patient_1080p_1",
+			"Nurse River Soothes The Aching Patient", mins(33, 49), "River Stone"),
+	}, testVocab())
 	m := ix.Match(Subtitle{
 		Stem:    "Nurse+River+Soothes+the+Aching+Patient+WM+(transcribed+on+24-Jul-2024+20-55-00)",
 		Runtime: mins(10, 52),
@@ -145,7 +156,7 @@ func TestMatch_DogPetSitterRename(t *testing.T) {
 	ix := NewIndex([]SceneRef{
 		scene("76466", "The-Reluctant-Pet-Sitter-Part-1", "", mins(11, 40)),
 		scene("6278", "Emmas Secret Life in The Dog Sitter", "", mins(14, 54)),
-	})
+	}, testVocab())
 	m := ix.Match(Subtitle{
 		Stem:    "thehousenextdoor2024 - The Reluctant Dog Sitter Part 1 - Compressed",
 		Runtime: mins(11, 38),
@@ -161,7 +172,7 @@ func TestMatch_JAVCode(t *testing.T) {
 		scene("60771", "2024-06-20_Hana.Kirsawa_Yui.Tomita_Mei.Arano-RCTD-590_1080p",
 			"RCTD-590", mins(132, 1), "Hana Kirsawa"),
 		scene("99999", "some other clip", "Unrelated", mins(20, 0)),
-	})
+	}, testVocab())
 	m := ix.Match(Subtitle{Stem: "RCTD-590-en"}, 5)
 	if b := m.Best(); b == nil || b.Scene.ID != "60771" {
 		t.Fatalf("best = %+v, want 60771", b)
@@ -173,7 +184,7 @@ func TestMatch_TrueTieIsAmbiguous(t *testing.T) {
 	ix := NewIndex([]SceneRef{
 		scene("52322", "La novia celosa", "", mins(36, 46)),
 		scene("69705", "La Novia Celosa", "", mins(36, 50)),
-	})
+	}, testVocab())
 	m := ix.Match(Subtitle{Stem: "La_novia_celosa_1", Runtime: mins(36, 36)}, 5)
 	if m.Verdict != Ambiguous {
 		t.Errorf("verdict = %s, want AMBIGUOUS (candidates %+v)", m.Verdict, m.Candidates)
@@ -184,9 +195,9 @@ func TestMatch_TrueTieIsAmbiguous(t *testing.T) {
 func TestMatch_Unmatched(t *testing.T) {
 	ix := NewIndex([]SceneRef{
 		scene("1", "completely different content", "Nothing Alike", mins(9, 0)),
-	})
+	}, testVocab())
 	m := ix.Match(Subtitle{
-		Stem:    "thehousenextdoor1 - Your Sinful Aunt Bringing Out Mommys Inner Slut",
+		Stem:    "thehousenextdoor1 - Your Sinful Aunt Bringing Out Mommys Secret Side",
 		Runtime: mins(18, 3),
 	}, 5)
 	if m.Verdict != Unmatched && m.Verdict != Ambiguous {
@@ -202,7 +213,7 @@ func TestMatch_Unmatched(t *testing.T) {
 func TestMatch_SubtitleClearlyLongerThanVideoIsRejected(t *testing.T) {
 	ix := NewIndex([]SceneRef{
 		scene("77855", "Wren Ashby - Mommy Has a Little Obsession", "", mins(20, 0)),
-	})
+	}, testVocab())
 	m := ix.Match(Subtitle{Stem: "Mommy Has a Little Obsession", Runtime: mins(30, 0)}, 5)
 	if m.Verdict == Confirmed || m.Verdict == Likely {
 		t.Errorf("verdict = %s for a subtitle 10min longer than the video; want AMBIGUOUS/UNMATCHED", m.Verdict)
@@ -214,7 +225,7 @@ func TestMatch_SmallOverrunIsTolerated(t *testing.T) {
 	ix := NewIndex([]SceneRef{
 		scene("1", "2021-06-18_Sable.Vance-Look.into.My.Eyes_1080p",
 			"Look into My Eyes", mins(24, 59), "Sable Vance"),
-	})
+	}, testVocab())
 	m := ix.Match(Subtitle{
 		Stem:    "2021-06-18_Sable.Vance-Look.into.My.Eyes_1080p",
 		Runtime: mins(25, 6),
@@ -229,7 +240,7 @@ func TestMatch_ExactFilename(t *testing.T) {
 	ix := NewIndex([]SceneRef{
 		scene("70051", "2021-06-18_Sable.Vance-Look.into.My.Eyes_1080p",
 			"Look into My Eyes", mins(11, 50), "Sable Vance"),
-	})
+	}, testVocab())
 	m := ix.Match(Subtitle{
 		Stem:    "2021-06-18_Sable.Vance-Look.into.My.Eyes_1080p",
 		Runtime: mins(11, 49),

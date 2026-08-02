@@ -43,7 +43,9 @@ Matching them back cannot rely on filenames alone, because the two names
 often share very little. Three independent signals are combined:
 
   studio/JAV code   near-decisive when present (VENU-765, RCTD-590)
-  title similarity  after stripping scraper noise and folding "step"
+  title similarity  after stripping scraper noise and folding "step", and
+                    after separating creator handles (taken from your own
+                    performer and studio names) from title words
   runtime           the subtitle's last cue against the scene duration
 
 Runtime is what makes it trustworthy. Two scenes can share a title, a
@@ -115,14 +117,22 @@ func subsSetup(ctx context.Context, cmd *cobra.Command, cfg *config.Config, clie
 	}
 	fmt.Fprintf(out, "reading files via %s\n", fs.Describe())
 
+	fmt.Fprintln(out, "fetching performer and studio names…")
+	names, err := client.CreatorNames(ctx)
+	if err != nil {
+		cleanup()
+		return nil, nil, nil, func() {}, err
+	}
+	vocab := subs.NewVocab(names)
+
 	fmt.Fprintln(out, "fetching scenes from Stash…")
 	scenes, err := loadSceneRefs(ctx, client, flagSubsPerPage)
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, func() {}, err
 	}
-	ix = subs.NewIndex(scenes)
-	fmt.Fprintf(out, "indexed %d scenes\n\n", ix.Len())
+	ix = subs.NewIndex(scenes, vocab)
+	fmt.Fprintf(out, "indexed %d scenes, %d creator words\n\n", ix.Len(), vocab.Len())
 	return fs, mp, ix, cleanup, nil
 }
 
