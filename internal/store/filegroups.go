@@ -103,7 +103,7 @@ func (s *Store) ListFileGroups(ctx context.Context, statuses []string) ([]*FileG
 	if err != nil {
 		return nil, fmt.Errorf("ListFileGroups query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*FileGroup
 	for rows.Next() {
@@ -151,7 +151,7 @@ func (s *Store) loadFileGroupFiles(ctx context.Context, fg *FileGroup) error {
 	if err != nil {
 		return fmt.Errorf("loading file_group_files: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	fg.Files = nil
 	for rows.Next() {
 		var f FileGroupFile

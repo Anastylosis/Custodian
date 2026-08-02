@@ -54,12 +54,12 @@ func integrationSSH(t *testing.T) (*SSH, string) {
 	}
 	dir := path.Join(base, "sj-sidecar-it-"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	if err := fs.MkdirAll(context.Background(), dir); err != nil {
-		fs.Close()
+		_ = fs.Close()
 		t.Fatalf("MkdirAll %q: %v", dir, err)
 	}
 	t.Cleanup(func() {
 		_ = fs.client.RemoveDirectory(dir)
-		fs.Close()
+		_ = fs.Close()
 	})
 	return fs, dir
 }
@@ -72,7 +72,7 @@ func write(t *testing.T, fs *SSH, p, contents string) {
 		t.Fatalf("create %q: %v", p, err)
 	}
 	if _, err := f.Write([]byte(contents)); err != nil {
-		f.Close()
+		_ = f.Close()
 		t.Fatalf("write %q: %v", p, err)
 	}
 	if err := f.Close(); err != nil {
@@ -125,7 +125,7 @@ func TestIntegrationSSHNeverOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open dst: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	buf := make([]byte, 8)
 	n, _ := f.Read(buf)
 	if got := string(buf[:n]); got != "PRECIOUS" {
@@ -201,7 +201,7 @@ func TestIntegrationSSHMoveFromLocal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open remote: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	buf := make([]byte, len(body))
 	n, _ := io.ReadFull(rc, buf)
 	if string(buf[:n]) != body {

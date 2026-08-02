@@ -98,7 +98,7 @@ func (c *Client) Execute(ctx context.Context, query string, variables map[string
 	if err != nil {
 		return fmt.Errorf("stash request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the body up front so we can include it in HTTP error messages
 	// even when the response isn't valid JSON. The size cap prevents a

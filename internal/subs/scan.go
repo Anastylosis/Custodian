@@ -83,13 +83,13 @@ func readInto(ctx context.Context, fs vfs.FS, p string, sub *Subtitle) error {
 	if d, ok := Runtime(rc); ok {
 		sub.Runtime = d
 	}
-	rc.Close()
+	_ = rc.Close()
 
 	rc, err = fs.Open(ctx, p)
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	if lang, _, ok := DetectLanguage(rc); ok {
 		sub.Lang = lang
 	}

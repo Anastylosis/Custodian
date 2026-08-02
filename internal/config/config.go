@@ -253,7 +253,7 @@ func WriteDefault(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := f.Write(defaultYAML); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)

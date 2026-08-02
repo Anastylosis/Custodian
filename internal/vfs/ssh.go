@@ -153,7 +153,7 @@ func hostKeyCallback(cfg SSHConfig) (ssh.HostKeyCallback, error) {
 			return nil, fmt.Errorf("%s does not exist; connect once with ssh, or set sidecars.ssh.accept_new_host_key: true", khPath)
 		}
 		if f, err := os.OpenFile(khPath, os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-			f.Close()
+			_ = f.Close()
 		}
 	}
 
@@ -185,7 +185,7 @@ func appendKnownHost(khPath, hostname string, key ssh.PublicKey) error {
 	if err != nil {
 		return fmt.Errorf("record new host key: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, err = f.WriteString(knownhosts.Line([]string{hostname}, key) + "\n")
 	return err
 }
@@ -227,14 +227,14 @@ func NewSSH(ctx context.Context, cfg SSHConfig) (*SSH, error) {
 		Timeout:         cfg.Timeout,
 	})
 	if err != nil {
-		rawConn.Close()
+		_ = rawConn.Close()
 		return nil, fmt.Errorf("ssh handshake with %s: %w", addr, err)
 	}
 	conn := ssh.NewClient(c, chans, reqs)
 
 	sc, err := sftp.NewClient(conn)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("start sftp on %s (is the sftp subsystem enabled?): %w", addr, err)
 	}
 	return &SSH{client: sc, conn: conn, label: fmt.Sprintf("ssh://%s@%s", cfg.User, addr)}, nil
@@ -338,7 +338,7 @@ func (s *SSH) copyThenRemove(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("open %q: %w", src, err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	tmp := dst + ".sj-partial"
 	out, err := s.client.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
@@ -346,16 +346,16 @@ func (s *SSH) copyThenRemove(src, dst string) error {
 		return fmt.Errorf("create %q: %w", tmp, err)
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		s.client.Remove(tmp)
+		_ = out.Close()
+		_ = s.client.Remove(tmp)
 		return fmt.Errorf("copy %q → %q: %w", src, dst, err)
 	}
 	if err := out.Close(); err != nil {
-		s.client.Remove(tmp)
+		_ = s.client.Remove(tmp)
 		return fmt.Errorf("close %q: %w", tmp, err)
 	}
 	if err := s.client.Rename(tmp, dst); err != nil {
-		s.client.Remove(tmp)
+		_ = s.client.Remove(tmp)
 		return fmt.Errorf("finalise %q: %w", dst, err)
 	}
 	if err := s.client.Remove(src); err != nil {

@@ -131,7 +131,7 @@ func copyThenRemove(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("open %q: %w", src, err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	tmp := dst + ".sj-partial"
 	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
@@ -139,21 +139,21 @@ func copyThenRemove(src, dst string) error {
 		return fmt.Errorf("create %q: %w", tmp, err)
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		os.Remove(tmp)
+		_ = out.Close()
+		_ = os.Remove(tmp)
 		return fmt.Errorf("copy %q → %q: %w", src, dst, err)
 	}
 	if err := out.Sync(); err != nil {
-		out.Close()
-		os.Remove(tmp)
+		_ = out.Close()
+		_ = os.Remove(tmp)
 		return fmt.Errorf("sync %q: %w", tmp, err)
 	}
 	if err := out.Close(); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("close %q: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("finalise %q: %w", dst, err)
 	}
 	if err := os.Remove(src); err != nil {

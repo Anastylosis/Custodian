@@ -106,7 +106,7 @@ func (s *Store) ListOrphanLookups(ctx context.Context, statuses []string) ([]*Or
 	if err != nil {
 		return nil, fmt.Errorf("ListOrphanLookups: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*OrphanLookup
 	for rows.Next() {

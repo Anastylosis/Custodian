@@ -62,14 +62,14 @@ func streamFile(ctx context.Context, srcFS, dstFS FS, src, tmp string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := dstFS.Create(ctx, tmp)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+		_ = out.Close()
 		return fmt.Errorf("copy %q: %w", src, err)
 	}
 	if err := out.Close(); err != nil {

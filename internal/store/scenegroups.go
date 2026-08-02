@@ -136,7 +136,7 @@ func (s *Store) ListSceneGroups(ctx context.Context, statuses []string) ([]*Scen
 	if err != nil {
 		return nil, fmt.Errorf("ListSceneGroups query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*SceneGroup
 	for rows.Next() {
@@ -208,7 +208,7 @@ func (s *Store) loadSceneGroupScenes(ctx context.Context, g *SceneGroup) error {
 	if err != nil {
 		return fmt.Errorf("loading scene_group_scenes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	g.Scenes = nil
 	for rows.Next() {
 		var sc SceneGroupScene

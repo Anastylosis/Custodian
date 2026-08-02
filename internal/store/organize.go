@@ -66,7 +66,7 @@ func (s *Store) ListOrganizePlans(ctx context.Context, statuses []string) ([]*Or
 	if err != nil {
 		return nil, fmt.Errorf("ListOrganizePlans: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*OrganizePlan
 	for rows.Next() {
