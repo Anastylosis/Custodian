@@ -76,14 +76,19 @@ StashJanitor handles both halves of that problem:
 stash-janitor sidecars check          # verify access + path mapping first
 
 # Fix subtitles that are ALREADY adrift: match them back to scenes.
-stash-janitor subs scan  --dir /data/webm
-stash-janitor subs apply --dir /data/webm --commit
+stash-janitor subs scan  --dir ~/Downloads/Subs
+stash-janitor subs apply --dir ~/Downloads/Subs --commit
 ```
 
-Matching combines studio/JAV codes, title similarity, and — decisively — the
+Matching combines studio/JAV codes, name similarity and — decisively — the
 subtitle's own runtime against the scene duration. Two scenes can share a
 title, performer and studio, but not a length: in practice the correct match
 lands within seconds while a same-titled decoy sits minutes away.
+
+Scene titles and filenames are scored separately, so a library that titles its
+scenes and one that encodes everything in filenames both match well. Matched
+subtitles are renamed to `<video-stem>.<lang>.srt`, which is the only form
+Stash attaches. The subtitles need not be on the same machine as the library.
 
 This is the only part of the tool that touches the filesystem, so it needs to
 reach your library. It works against a local path, a mounted share (including
