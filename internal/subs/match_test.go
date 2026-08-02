@@ -329,3 +329,49 @@ func TestMatch_JunkFilenameDoesNotDiluteGoodTitle(t *testing.T) {
 			best.Score, best.Reasons)
 	}
 }
+
+// People file subtitles under a performer folder, which names the creator even
+// when the filename does not. Ignoring that discards the strongest hint
+// available for a generically-named file.
+func TestMatch_FolderNamesGiveCreatorHint(t *testing.T) {
+	scenes := []SceneRef{
+		{ID: "1", Stem: "clip_a", Title: "Prom Night", Path: "/data/a/clip_a.mp4",
+			Duration: mins(10, 0), Performers: []string{"River Stone"}},
+		{ID: "2", Stem: "clip_b", Title: "Prom Night", Path: "/data/b/clip_b.mp4",
+			Duration: mins(10, 0), Performers: []string{"Quinn Marsh"}},
+	}
+	ix := NewIndex(scenes, testVocab())
+
+	// Identical title and runtime: only the folder can separate them.
+	m := ix.Match(Subtitle{
+		Stem:    "Prom Night",
+		Runtime: mins(9, 58),
+		Dirs:    []string{"Quinn Marsh", "Subs"},
+	}, 5)
+
+	best := m.Best()
+	if best == nil {
+		t.Fatal("no candidate")
+	}
+	if best.Scene.ID != "2" {
+		t.Errorf("best = scene %s, want 2 (the folder names its performer)", best.Scene.ID)
+	}
+}
+
+// The folder must inform who, never what: a folder called "Subs" or "Downloads"
+// must not contribute title evidence.
+func TestMatch_FolderNamesAreNotTitleEvidence(t *testing.T) {
+	ix := NewIndex([]SceneRef{
+		{ID: "1", Stem: "x", Title: "Subs Downloads Complete", Path: "/data/a/x.mp4",
+			Duration: mins(10, 0)},
+	}, testVocab())
+
+	m := ix.Match(Subtitle{
+		Stem:    "Totally Different Name",
+		Runtime: mins(9, 58),
+		Dirs:    []string{"Subs", "Downloads", "Complete"},
+	}, 5)
+	if b := m.Best(); b != nil && b.NameSim > 0 {
+		t.Errorf("folder words leaked into title similarity: %.2f (%v)", b.NameSim, b.Reasons)
+	}
+}

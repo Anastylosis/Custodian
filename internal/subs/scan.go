@@ -55,6 +55,7 @@ func Collect(ctx context.Context, fs vfs.FS, dir string, exts []string, recursiv
 				Path: p,
 				Stem: strings.TrimSuffix(e.Name, extOf(e.Name)),
 				Size: e.Size,
+				Dirs: relDirs(dir, d),
 			}
 			if err := readInto(ctx, fs, p, &sub); err != nil {
 				problems = append(problems, fmt.Sprintf("%s: %v", p, err))
@@ -93,6 +94,18 @@ func readInto(ctx context.Context, fs vfs.FS, p string, sub *Subtitle) error {
 		sub.Lang = lang
 	}
 	return nil
+}
+
+// relDirs returns the folder names between the scan root and dir.
+func relDirs(root, dir string) []string {
+	if len(dir) <= len(root) {
+		return nil
+	}
+	rest := strings.Trim(strings.TrimPrefix(dir, root), `/\`)
+	if rest == "" {
+		return nil
+	}
+	return strings.FieldsFunc(rest, func(r rune) bool { return r == '/' || r == '\\' })
 }
 
 func extOf(name string) string {

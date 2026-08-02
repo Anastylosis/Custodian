@@ -67,6 +67,11 @@ type Subtitle struct {
 	Lang string
 	// Size in bytes, used to break ties between duplicate transcripts.
 	Size int64
+	// Dirs are the folder names between the scan root and the file. People
+	// file subtitles under a performer or studio folder, which names the
+	// creator even when the filename does not — a strong hint that would
+	// otherwise be discarded.
+	Dirs []string
 }
 
 // Candidate is one scored possibility for a subtitle.
@@ -129,6 +134,11 @@ func NewIndex(scenes []SceneRef, vocab *Vocab) *Index {
 		blob := strings.Join(append([]string{s.Stem, s.Title, s.Studio}, s.Performers...), " ")
 		s.tokens = Tokens(blob)
 		_, s.creator = vocab.Split(s.tokens)
+		// A folder hint names a performer or studio in words, so the scene's
+		// creator set needs those words too, not only squashed handles.
+		for t := range Tokens(strings.Join(append([]string{s.Studio}, s.Performers...), " ")) {
+			s.creator[t] = true
+		}
 		s.titleContent, _ = vocab.Split(Tokens(s.Title))
 		s.stemContent, _ = vocab.Split(Tokens(s.Stem))
 		s.codes = Codes(blob)
@@ -162,6 +172,13 @@ func (ix *Index) Match(sub Subtitle, maxCandidates int) Match {
 	}
 	subTokens := Tokens(sub.Stem)
 	subContent, subCreator := ix.vocab.Split(subTokens)
+	// Folder names contribute creator evidence only, never title evidence:
+	// "Subs/Some Performer/Subs/clip.srt" says who, not what.
+	for _, d := range sub.Dirs {
+		for t := range Tokens(d) {
+			subCreator[t] = true
+		}
+	}
 	subCodes := Codes(sub.Stem)
 	subStemNorm := normKey(sub.Stem)
 
