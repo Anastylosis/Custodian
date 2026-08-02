@@ -365,8 +365,8 @@ stash-janitor organize report --filter skip      # files without enough metadata
 Example output:
 ```
 [move] scene 20
-  from: /data/SandraR/2018-11-09_Amber.Chase-Mom.Cures.Milf.Addiction_720p.mp4
-  to:   /data/Amber Chase/2018-11-09_Amber.Chase-Mom.Cures.Milf.Addiction_720p.mp4
+  from: /data/SomeStudio/2018-11-09_Ninth.Performer-Mom.Cures.Milf.Addiction_720p.mp4
+  to:   /data/Ninth Performer/2018-11-09_Ninth.Performer-Mom.Cures.Milf.Addiction_720p.mp4
 
 [rename] scene 49
   from: /data/Addie Andrews/2020-02-03_Addie.Andrews-Complicit.Consumption_544p.mp4
@@ -389,7 +389,7 @@ organize:
   path_template: "{performer}/{date}_{performer}-{title}_{resolution}.{ext}"
 ```
 
-Result: `/data/Aimee Waves/2024-12-15_Aimee.Waves-Your.Work.Crush_1080p.mp4`
+Result: `/data/Some Performer/2024-12-15_Some.Performer-A.Long.Scene.Title_1080p.mp4`
 
 For **Whisparr compatibility**, uncomment the studio-first template in
 `config.yaml`:
@@ -398,15 +398,15 @@ organize:
   path_template: "{studio}/{date} - {title}/{date}_{performer}-{title}_{resolution}.{ext}"
 ```
 
-Result: `/data/New Sensations/2024-12-15 - Your Work Crush/2024-12-15_Aimee.Waves-Your.Work.Crush_1080p.mp4`
+Result: `/data/Some Studio/2024-12-15 - A Long Scene Title/2024-12-15_Some.Performer-A.Long.Scene.Title_1080p.mp4`
 
 Available template variables:
 
 | Variable | Example | Source |
 |---|---|---|
-| `{performer}` | `Aimee Waves` | Primary performer (first alphabetically) |
-| `{studio}` | `New Sensations` | Studio name from Stash |
-| `{title}` | `Your Work Crush` | Scene title (spaces → `space_char`) |
+| `{performer}` | `Some Performer` | Primary performer (first alphabetically) |
+| `{studio}` | `Some Studio` | Studio name from Stash |
+| `{title}` | `A Long Scene Title` | Scene title (spaces → `space_char`) |
 | `{date}` | `2024-12-15` | Scene date |
 | `{year}` | `2024` | First 4 chars of date |
 | `{resolution}` | `1080p`, `4k` | Derived from video height |
@@ -414,8 +414,8 @@ Available template variables:
 | `{id}` | `42` | Stash scene ID (guaranteed unique) |
 
 Folder parts use `folder_space_char` (default: space), filename parts
-use `space_char` (default: dot). So `Aimee Waves` becomes the folder
-`Aimee Waves/` but the filename part `Aimee.Waves`.
+use `space_char` (default: dot). So `Some Performer` becomes the folder
+`Some Performer/` but the filename part `Some.Performer`.
 
 ## Safety features
 

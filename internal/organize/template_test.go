@@ -24,16 +24,16 @@ func defaultCfg() *config.OrganizeConfig {
 func TestComputeTargetPathSinglePerformer(t *testing.T) {
 	scene := &stash.Scene{
 		ID:    "42",
-		Title: "Your Work Crush has a Girl Cock",
+		Title: "A Long Scene Title With Words",
 		Date:  "2024-12-15",
-		Performers: []stash.Performer{{Name: "Aimee Waves"}},
+		Performers: []stash.Performer{{Name: "Some Performer"}},
 	}
 	file := &stash.VideoFile{Basename: "junk.mp4", Height: 1080}
 	target, reason := ComputeTargetPath(scene, file, defaultCfg())
 	if reason != "" {
 		t.Fatalf("unexpected skip: %s", reason)
 	}
-	want := "/data/Aimee Waves/2024-12-15_Aimee.Waves-Your.Work.Crush.has.a.Girl.Cock_1080p.mp4"
+	want := "/data/Some Performer/2024-12-15_Some.Performer-A.Long.Scene.Title.With.Words_1080p.mp4"
 	if target != want {
 		t.Errorf("got:  %s\nwant: %s", target, want)
 	}
@@ -98,18 +98,18 @@ func TestComputeTargetPathMultiPerformerAlphabetical(t *testing.T) {
 	scene := &stash.Scene{
 		ID: "42", Title: "Title", Date: "2024-01-01",
 		Performers: []stash.Performer{
-			{Name: "Zoe Bloom"},
-			{Name: "Aimee Waves"},
+			{Name: "Zeta Performer"},
+			{Name: "Some Performer"},
 		},
 	}
 	file := &stash.VideoFile{Basename: "x.mp4", Height: 1080}
 	target, _ := ComputeTargetPath(scene, file, defaultCfg())
 	// Folder = first alphabetical performer.
-	if !strings.Contains(target, "Aimee Waves/") {
-		t.Errorf("expected folder to be Aimee Waves, got: %s", target)
+	if !strings.Contains(target, "Some Performer/") {
+		t.Errorf("expected folder to be Some Performer, got: %s", target)
 	}
 	// Filename = both performers, alphabetical.
-	if !strings.Contains(target, "Aimee.Waves_Zoe.Bloom") {
+	if !strings.Contains(target, "Some.Performer_Zeta.Performer") {
 		t.Errorf("expected both performers in filename, got: %s", target)
 	}
 }

@@ -157,7 +157,7 @@ func TestProcessSceneGroupFilenameInfoLossSafetyNet(t *testing.T) {
 			"/data/tmp3/Spying-on-Mom-Get-s-you-Milked.mp4", false, 0),
 		// Structured filename, lower resolution, no metadata.
 		makeScene("100", false, 1920, 1080, 4_000_000, "h264", 2_000_000_000,
-			"/data/Performers/2024-12-15_Kelly.Payne-Spy.on.Mom_1080p.mp4", false, 0),
+			"/data/Performers/2024-12-15_Seventh.Performer-Spy.on.Mom_1080p.mp4", false, 0),
 	}
 	sig := store.SceneGroupSignature([]string{"99", "100"})
 
@@ -219,7 +219,7 @@ func TestProcessSceneGroupNoSafetyNetWhenKeeperHasGoodFilename(t *testing.T) {
 
 	raw := []stash.Scene{
 		makeScene("100", true, 1920, 1080, 4_000_000, "h264", 2_000_000_000,
-			"/data/Performers/2024-12-15_Kelly.Payne-Spy.on.Mom_1080p.mp4", true, 5),
+			"/data/Performers/2024-12-15_Seventh.Performer-Spy.on.Mom_1080p.mp4", true, 5),
 		makeScene("99", false, 1280, 720, 2_000_000, "h264", 1_000_000_000,
 			"/data/tmp3/random.mp4", false, 0),
 	}

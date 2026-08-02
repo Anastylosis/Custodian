@@ -14,10 +14,10 @@ func TestParseFilenameMetadata(t *testing.T) {
 	}{
 		{
 			name:      "standard single performer",
-			basename:  "2024-12-15_Aimee.Waves-Your.Work.Crush.has.a.Girl.Cock_1080p.mp4",
+			basename:  "2024-12-15_Some.Performer-A.Long.Scene.Title.With.Words_1080p.mp4",
 			wantDate:  "2024-12-15",
-			wantTitle: "Your Work Crush has a Girl Cock",
-			wantPerf:  []string{"Aimee Waves"},
+			wantTitle: "A Long Scene Title With Words",
+			wantPerf:  []string{"Some Performer"},
 		},
 		{
 			name:      "title with dash",
@@ -42,10 +42,10 @@ func TestParseFilenameMetadata(t *testing.T) {
 		},
 		{
 			name:      "import suffix",
-			basename:  "2024-12-15_Aimee.Waves-Your.Work.Crush_1080p_1.mp4",
+			basename:  "2024-12-15_Some.Performer-A.Long.Scene.Title_1080p_1.mp4",
 			wantDate:  "2024-12-15",
-			wantTitle: "Your Work Crush",
-			wantPerf:  []string{"Aimee Waves"},
+			wantTitle: "A Long Scene Title",
+			wantPerf:  []string{"Some Performer"},
 		},
 		{
 			name:      "performers omitted (dash at start)",

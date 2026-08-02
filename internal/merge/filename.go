@@ -28,8 +28,8 @@ var defaultFilenameMetadataPattern = regexp.MustCompile(
 // FilenameMetadata is the result of parsing a structured filename.
 type FilenameMetadata struct {
 	Date       string   // "2024-12-15" — normalized to YYYY-MM-DD
-	Title      string   // "Your Work Crush has a Girl Cock"
-	Performers []string // ["Aimee Waves"]
+	Title      string   // "A Long Scene Title With Words"
+	Performers []string // ["Some Performer"]
 }
 
 // ParseFilenameMetadata attempts to extract date, title, and performer

@@ -47,7 +47,7 @@ func TestClassifyFilenameMatchesUserConvention(t *testing.T) {
 	matches := []string{
 		// User's convention from PLAN.md
 		"2023-10-24_Codi.Vore-How.Women.Orgasm.-.Codi.Vore_1080p.mp4",
-		"2024-12-15_Aimee.Waves-Your.Work.Crush.has.a.Girl.Cock_1080p.mp4",
+		"2024-12-15_Some.Performer-A.Long.Scene.Title.With.Words_1080p.mp4",
 		// Performers omitted (>3 performer case)
 		"2023-10-24_-Group.Title_1080p.mp4",
 		// 4K resolution token
@@ -62,7 +62,7 @@ func TestClassifyFilenameMatchesUserConvention(t *testing.T) {
 	}
 
 	misses := []string{
-		"BettieBondage_BettieBondage_Boyfriend_and_Dad_Cumfuck_Bettie_4K.mp4", // missing date prefix
+		"SomeStudio_SomeStudio_Boyfriend_and_Dad_Cumfuck_Performer_4K.mp4", // missing date prefix
 		"video_001.mp4",
 		"IMG_2023.mov",
 		"some random title.mp4",

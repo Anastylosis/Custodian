@@ -205,9 +205,9 @@ organize:
   # path_template: "{studio}/{date}_{performer}-{title}_{resolution}.{ext}"
 
   # How spaces are rendered in filename components.
-  space_char: "."              # "Aimee Waves" → "Aimee.Waves" in filenames
+  space_char: "."              # "Some Performer" → "Some.Performer" in filenames
   # How spaces are rendered in folder name components.
-  folder_space_char: " "       # "Aimee Waves" stays "Aimee Waves" as folder
+  folder_space_char: " "       # "Some Performer" stays "Some Performer" as folder
 
   # How to pick the primary performer when a scene has multiple.
   # first_alphabetical — alphabetically first (deterministic, stable)
