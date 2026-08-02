@@ -44,23 +44,23 @@ func TestIsSidecarOf(t *testing.T) {
 
 func TestPlan_PreservesLanguageSuffix(t *testing.T) {
 	siblings := []string{
-		"2023-05-27_Some.Performer-Fucktoy_1080p.mp4",
-		"2023-05-27_Some.Performer-Fucktoy_1080p.en.srt",
-		"2023-05-27_Some.Performer-Fucktoy_1080p.es.srt",
+		"2023-05-27_River.Stone-Nightshift_1080p.mp4",
+		"2023-05-27_River.Stone-Nightshift_1080p.en.srt",
+		"2023-05-27_River.Stone-Nightshift_1080p.es.srt",
 		"unrelated.mp4",
 		"unrelated.srt",
 	}
 	got := Plan(
-		"2023-05-27_Some.Performer-Fucktoy_1080p.mp4",
-		"Some Performer/2024-01-01_New.Name_4k.mkv",
+		"2023-05-27_River.Stone-Nightshift_1080p.mp4",
+		"River Stone/2024-01-01_New.Name_4k.mkv",
 		siblings, nil,
 	)
 	// dstVideo is passed as a basename by callers; stemOf handles the ext only.
 	want := []Move{
-		{SrcBasename: "2023-05-27_Some.Performer-Fucktoy_1080p.en.srt",
-			DstBasename: "Some Performer/2024-01-01_New.Name_4k.en.srt", Suffix: ".en.srt"},
-		{SrcBasename: "2023-05-27_Some.Performer-Fucktoy_1080p.es.srt",
-			DstBasename: "Some Performer/2024-01-01_New.Name_4k.es.srt", Suffix: ".es.srt"},
+		{SrcBasename: "2023-05-27_River.Stone-Nightshift_1080p.en.srt",
+			DstBasename: "River Stone/2024-01-01_New.Name_4k.en.srt", Suffix: ".en.srt"},
+		{SrcBasename: "2023-05-27_River.Stone-Nightshift_1080p.es.srt",
+			DstBasename: "River Stone/2024-01-01_New.Name_4k.es.srt", Suffix: ".es.srt"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Plan() =\n %+v\nwant\n %+v", got, want)
@@ -121,12 +121,12 @@ func TestPlan_CustomExtensions(t *testing.T) {
 // wild when organize moved videos out of tmp2/ into performer folders.
 func TestPlan_RealWorldOrphanCase(t *testing.T) {
 	siblings := []string{
-		"2020-07-03_Other.Performer-Flirting.with.Mom.Through.the.Decades_4k.mp4",
-		"2020-07-03_Other.Performer-Flirting.with.Mom.Through.the.Decades_4k.srt",
+		"2020-07-03_Wren.Ashby-Flirting.with.Mom.Through.the.Decades_4k.mp4",
+		"2020-07-03_Wren.Ashby-Flirting.with.Mom.Through.the.Decades_4k.srt",
 	}
 	got := Plan(
-		"2020-07-03_Other.Performer-Flirting.with.Mom.Through.the.Decades_4k.mp4",
-		"2020-07-03_Other.Performer-Flirting.with.Mom.Through.the.Decades_4k.mp4",
+		"2020-07-03_Wren.Ashby-Flirting.with.Mom.Through.the.Decades_4k.mp4",
+		"2020-07-03_Wren.Ashby-Flirting.with.Mom.Through.the.Decades_4k.mp4",
 		siblings, nil,
 	)
 	if len(got) != 1 || got[0].Suffix != ".srt" {

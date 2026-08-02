@@ -6,11 +6,11 @@ import (
 
 func TestParseFilenameMetadata(t *testing.T) {
 	cases := []struct {
-		name     string
-		basename string
-		wantDate string
+		name      string
+		basename  string
+		wantDate  string
 		wantTitle string
-		wantPerf []string
+		wantPerf  []string
 	}{
 		{
 			name:      "standard single performer",

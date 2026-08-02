@@ -365,8 +365,8 @@ stash-janitor organize report --filter skip      # files without enough metadata
 Example output:
 ```
 [move] scene 20
-  from: /data/SomeStudio/2018-11-09_Ninth.Performer-Mom.Cures.Milf.Addiction_720p.mp4
-  to:   /data/Ninth Performer/2018-11-09_Ninth.Performer-Mom.Cures.Milf.Addiction_720p.mp4
+  from: /data/unsorted/2018-11-09_Some.Performer-Some.Title_720p.mp4
+  to:   /data/Some Performer/2018-11-09_Some.Performer-Some.Title_720p.mp4
 
 [rename] scene 49
   from: /data/Addie Andrews/2020-02-03_Addie.Andrews-Complicit.Consumption_544p.mp4
@@ -535,9 +535,9 @@ silently skipping files during an apply.
 ✓ backend reachable: ssh://me@nas.local:22
 
 Testing 5 path(s):
-  ✓ /data/Some Performer/SomeHandle_Al telefono con mi marido 1080p.mp4
-      sidecar: SomeHandle_Al telefono con mi marido 1080p.en.srt
-      sidecar: SomeHandle_Al telefono con mi marido 1080p.es.srt
+  ✓ /data/Some Performer/Clip_con_subtitulos_1080p.mp4
+      sidecar: Clip_con_subtitulos_1080p.en.srt
+      sidecar: Clip_con_subtitulos_1080p.es.srt
 
 readable: 5   failed: 0   sidecars found: 2
 ```
@@ -586,8 +586,8 @@ SSH.
 Filenames alone are not enough. These are real pairs:
 
 ```
-StudioHandleXXX_Mommy-and-Son-Breeding-Season+(transcribed+on+25-Jul-2024).srt
-  → 2023-05-23_Some.Performer-stepMommy.and.stepSon.Breeding.Season_1080p.mp4
+StudioHandleXXX_Mommy-and-Son-Nesting-Season+(transcribed+on+25-Jul-2024).srt
+  → 2023-05-23_Some.Performer-stepMommy.and.stepSon.Nesting.Season_1080p.mp4
 
 thehousenextdoor2024 - The Reluctant Dog Sitter - Compressed.srt
   → The-Reluctant-Pet-Sitter-Part-1.mp4
@@ -608,9 +608,9 @@ performer and a studio, but not a length. In practice a correct match lands
 within a couple of seconds while a same-titled decoy sits minutes away:
 
 ```
-Nurse+River+Soothes+the+Aching+Patient+WM+(transcribed…).srt   18:03
-  → #55739  Nurse River Soothes The Aching Patient   10:54   +2s     ✓
-    #75175  Nurse River Soothes The Aching Patient   33:49   +1377s  ✗
+Nurse+River+Soothes+the+Aching+Patient+WM+(transcribed…).srt   10:52
+  → #55739  Nurse River Soothes the Aching Patient   10:54   +2s     ✓
+    #75175  Nurse River Soothes the Aching Patient   33:49   +1377s  ✗
 ```
 
 Names were a dead tie; runtime was not.

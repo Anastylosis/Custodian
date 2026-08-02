@@ -34,14 +34,14 @@ func TestMover_MovesSidecarWithVideo(t *testing.T) {
 	mv := newTestMover(t, fs, []pathmap.Rule{{StashPrefix: "/data", LocalPrefix: "/mnt/lib"}})
 	ctx := context.Background()
 
-	moves, err := mv.Plan(ctx, "/data/tmp2/clip_1080p.mp4", "/data/Some Performer/2024_Clip_4k.mp4")
+	moves, err := mv.Plan(ctx, "/data/tmp2/clip_1080p.mp4", "/data/River Stone/2024_Clip_4k.mp4")
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
 	if len(moves) != 2 {
 		t.Fatalf("Plan returned %d moves, want 2: %+v", len(moves), moves)
 	}
-	if moves[0].DstStash != "/data/Some Performer/2024_Clip_4k.en.srt" {
+	if moves[0].DstStash != "/data/River Stone/2024_Clip_4k.en.srt" {
 		t.Errorf("unexpected destination: %q", moves[0].DstStash)
 	}
 
@@ -51,8 +51,8 @@ func TestMover_MovesSidecarWithVideo(t *testing.T) {
 			len(res.Moved), len(res.Skipped), len(res.Failed))
 	}
 	for _, want := range []string{
-		"/mnt/lib/Some Performer/2024_Clip_4k.en.srt",
-		"/mnt/lib/Some Performer/2024_Clip_4k.es.srt",
+		"/mnt/lib/River Stone/2024_Clip_4k.en.srt",
+		"/mnt/lib/River Stone/2024_Clip_4k.es.srt",
 	} {
 		if !fs.Files[want] {
 			t.Errorf("expected %q to exist after apply. Have:\n%s", want, fs)

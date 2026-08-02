@@ -720,26 +720,37 @@ For subtitles that are already adrift, filename comparison is not enough — rea
 pairs share almost no text:
 
 ```
-StudioHandleXXX_Mommy-and-Son-Breeding-Season+(transcribed+on+25-Jul-2024).srt
-  → 2023-05-23_Some.Performer-stepMommy.and.stepSon.Breeding.Season_1080p.mp4
+StudioHandleXXX_Mommy-and-Son-Nesting-Season+(transcribed+on+25-Jul-2024).srt
+  → 2023-05-23_Some.Performer-stepMommy.and.stepSon.Nesting.Season_1080p.mp4
 ```
 
 Three independent signals are combined: studio/JAV code, normalised title
 tokens, and the subtitle's runtime versus the scene duration.
 
 **Runtime is the decisive signal.** Two scenes can share a title, performer and
-studio but not a length. Measured on the real library, the correct match for
-`Nurse River Soothes The Aching Patient` was +2s away while an identically
-titled decoy was +1377s — a distinction no string metric can make.
+studio but not a length. Measured on the real library, the correct match for one
+subtitle was +2s away while an identically titled decoy was +1377s — a
+distinction no string metric can make.
 
 Rationale for specific choices:
 
 - **`step` prefix folding.** `stepMommy` and `Mommy` are one word for matching.
   Omitting this caused two genuine matches to be reported as unmatched on the
   first pass over the real library.
-- **Creator handles are dropped** (`thehousenextdoor1`, `StudioHandleXXX`). They
-  appear in the subtitle name but not the scene title, and would otherwise let
-  two unrelated clips from one creator score as a match.
+- **Creator handles come from Stash, not a hard-coded list.** Performer and
+  studio names plus their aliases are fetched and squashed into handles
+  ("thehousenextdoor2024"), then split out of the tokens used for title
+  similarity. A hand-maintained list could only ever grow, needed editing
+  whenever a new creator appeared, and put personal names in committed source.
+- **Only squashed handles, never individual name words.** Taking every word
+  from every alias in a 4,298-performer library produced ~9,500 entries and
+  swept up ordinary vocabulary — words like "sinful" and "aunt" appear in
+  someone's alias list. Measured against the live library that pushed a correct
+  candidate (runtime +1s) out of the top three. Squashed handles are inherently
+  distinctive and carry the benefit without the collateral damage.
+- **Creator agreement is scored separately** as a small bonus rather than
+  folded into title similarity, so it narrows the field without ever deciding
+  on its own.
 - **The gap to the runner-up gates the verdict.** A high score with a near-tie
   is precisely where an automatic choice is wrong, so it becomes `AMBIGUOUS`.
 - **Language is detected from file contents, never the filename**, which is
@@ -751,8 +762,8 @@ Rationale for specific choices:
 ### 15.5 Known gaps
 
 - The matcher does not use performer identity as a signal. A real case
-  (`A Mother's Obsession` vs. an Wren Ashby scene) was correctly rejected by a
-  human on creator mismatch but scores as plausible here; it lands in
-  `AMBIGUOUS`, which is safe but not maximally precise.
+  was correctly rejected by a human on creator mismatch but scores as plausible
+  here; it lands in `AMBIGUOUS`, which is safe but not maximally precise.
+  Creator agreement is now scored, but disagreement is not yet penalised.
 - `subs scan` and `subs apply` each fetch the whole library. At 61k scenes that
   is roughly a minute per invocation. Caching into the store would fix it.

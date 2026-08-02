@@ -21,8 +21,8 @@ func TestToLocal(t *testing.T) {
 		{
 			name:  "linux mount",
 			rules: []Rule{{"/data", "/mnt/nas/Videos"}},
-			in:    "/data/Some Performer/clip.mp4",
-			want:  "/mnt/nas/Videos/Some Performer/clip.mp4",
+			in:    "/data/River Stone/clip.mp4",
+			want:  "/mnt/nas/Videos/River Stone/clip.mp4",
 		},
 		{
 			name:  "nas local path",
@@ -33,8 +33,8 @@ func TestToLocal(t *testing.T) {
 		{
 			name:  "windows mapped drive",
 			rules: []Rule{{"/data", `Z:\Videos`}},
-			in:    "/data/Some Performer/clip.mp4",
-			want:  `Z:\Videos\Some Performer\clip.mp4`,
+			in:    "/data/River Stone/clip.mp4",
+			want:  `Z:\Videos\River Stone\clip.mp4`,
 		},
 		{
 			name:  "windows UNC",
@@ -109,7 +109,7 @@ func TestRoundTrip(t *testing.T) {
 		{{"/data", `\\nas\main\Videos`}},
 	} {
 		m := mustNew(t, rules)
-		const orig = "/data/Some Performer/clip.en.srt"
+		const orig = "/data/River Stone/clip.en.srt"
 		local, err := m.ToLocal(orig)
 		if err != nil {
 			t.Fatalf("ToLocal: %v", err)

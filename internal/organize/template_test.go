@@ -10,22 +10,22 @@ import (
 
 func defaultCfg() *config.OrganizeConfig {
 	return &config.OrganizeConfig{
-		BaseDir:                  "/data",
-		PathTemplate:             "{performer}/{date}_{performers}-{title}_{resolution}.{ext}",
-		SpaceChar:                ".",
-		FolderSpaceChar:          " ",
-		PerformerStrategy:        "first_alphabetical",
-		MaxPerformersInFilename:  3,
-		RequiredFields:           []string{"performer", "date"},
-		RenameInPlace:            true,
+		BaseDir:                 "/data",
+		PathTemplate:            "{performer}/{date}_{performers}-{title}_{resolution}.{ext}",
+		SpaceChar:               ".",
+		FolderSpaceChar:         " ",
+		PerformerStrategy:       "first_alphabetical",
+		MaxPerformersInFilename: 3,
+		RequiredFields:          []string{"performer", "date"},
+		RenameInPlace:           true,
 	}
 }
 
 func TestComputeTargetPathSinglePerformer(t *testing.T) {
 	scene := &stash.Scene{
-		ID:    "42",
-		Title: "A Long Scene Title With Words",
-		Date:  "2024-12-15",
+		ID:         "42",
+		Title:      "A Long Scene Title With Words",
+		Date:       "2024-12-15",
 		Performers: []stash.Performer{{Name: "Some Performer"}},
 	}
 	file := &stash.VideoFile{Basename: "junk.mp4", Height: 1080}
@@ -137,8 +137,8 @@ func TestComputeTargetPathMissingDate(t *testing.T) {
 
 func TestComputeTargetPathSanitizesFilename(t *testing.T) {
 	scene := &stash.Scene{
-		Title: "What? Why: Because!",
-		Date:  "2024-01-01",
+		Title:      "What? Why: Because!",
+		Date:       "2024-01-01",
 		Performers: []stash.Performer{{Name: "Test"}},
 	}
 	file := &stash.VideoFile{Basename: "x.mp4", Height: 1080}

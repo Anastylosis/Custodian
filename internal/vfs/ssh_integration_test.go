@@ -86,7 +86,7 @@ func TestIntegrationSSHRenameRoundTrip(t *testing.T) {
 
 	// Deliberately awful name: the characters that make shelling out to `mv`
 	// unsafe, and that this library's real filenames actually contain.
-	src := path.Join(dir, "StudioHandleXXX+-+Free Use (2024)'s & more.en.srt")
+	src := path.Join(dir, "RiverStoneXXX+-+Free Use (2024)'s & more.en.srt")
 	dst := path.Join(dir, "2024-01-01_Renamed.Clip_1080p.en.srt")
 	write(t, fs, src, "1\n00:00:01,000 --> 00:00:02,000\nhello\n")
 
