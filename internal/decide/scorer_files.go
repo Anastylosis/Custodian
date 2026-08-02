@@ -91,7 +91,7 @@ func (s *FileScorer) DecideFiles(files []store.FileGroupFile) Decision {
 		if s.compareFiles(&files[best], &files[i]) == 0 {
 			return Decision{
 				KeeperIndex: -1,
-				Reason: fmt.Sprintf("tied on every rule: files %s and %s", files[best].FileID, files[i].FileID),
+				Reason:      fmt.Sprintf("tied on every rule: files %s and %s", files[best].FileID, files[i].FileID),
 			}
 		}
 	}
@@ -197,11 +197,11 @@ func ruleModTime(_ *FileScorer, a, b *store.FileGroupFile) int {
 // lose quality, so this method uses a fixed rule chain that prioritizes
 // quality first, then filename quality:
 //
-//	1. resolution     (width × height — higher wins)
-//	2. bitrate        (higher wins)
-//	3. filename_quality (regex match — true wins)
-//	4. file_size      (larger wins, tiebreaker)
-//	5. mod_time       (newer wins, last-resort tiebreaker)
+//  1. resolution     (width × height — higher wins)
+//  2. bitrate        (higher wins)
+//  3. filename_quality (regex match — true wins)
+//  4. file_size      (larger wins, tiebreaker)
+//  5. mod_time       (newer wins, last-resort tiebreaker)
 //
 // This rule chain is intentionally NOT configurable in Phase 1 — there
 // is exactly one sensible policy for picking the best of N different

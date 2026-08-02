@@ -31,12 +31,12 @@ type ScenesOptions struct {
 // ScenesResult is what the caller (cli layer) reports to the user after a
 // successful scan.
 type ScenesResult struct {
-	ScanRunID    int64
-	GroupCount   int
-	NewGroups    int
-	Decided      int
-	NeedsReview  int
-	Dismissed    int
+	ScanRunID   int64
+	GroupCount  int
+	NewGroups   int
+	Decided     int
+	NeedsReview int
+	Dismissed   int
 }
 
 // Scenes runs workflow A's scan-and-decide pipeline:

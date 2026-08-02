@@ -56,11 +56,11 @@ func (s *Store) LatestScanRun(ctx context.Context, workflow string) (*ScanRun, e
 
 func scanScanRun(row *sql.Row) (*ScanRun, error) {
 	var (
-		r           ScanRun
-		started     string
-		finished    sql.NullString
-		distance    sql.NullInt64
-		durDiff     sql.NullFloat64
+		r        ScanRun
+		started  string
+		finished sql.NullString
+		distance sql.NullInt64
+		durDiff  sql.NullFloat64
 	)
 	if err := row.Scan(&r.ID, &r.Workflow, &started, &finished, &distance, &durDiff, &r.GroupCount, &r.Notes); err != nil {
 		if err == sql.ErrNoRows {

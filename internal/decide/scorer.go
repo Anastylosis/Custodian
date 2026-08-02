@@ -206,7 +206,7 @@ func (s *SceneScorer) DecideScenes(scenes []store.SceneGroupScene) Decision {
 		if s.compare(&scenes[best], &scenes[i]) == 0 {
 			return Decision{
 				KeeperIndex: -1,
-				Reason: fmt.Sprintf("tied on every rule: scenes %s and %s", scenes[best].SceneID, scenes[i].SceneID),
+				Reason:      fmt.Sprintf("tied on every rule: scenes %s and %s", scenes[best].SceneID, scenes[i].SceneID),
 			}
 		}
 	}

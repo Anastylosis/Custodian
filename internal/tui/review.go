@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/Wasylq/StashJanitor/internal/confirm"
 	"github.com/Wasylq/StashJanitor/internal/decide"
 	"github.com/Wasylq/StashJanitor/internal/store"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Model is the bubbletea model for `stash-janitor review`.

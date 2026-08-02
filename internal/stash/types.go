@@ -10,17 +10,17 @@ package stash
 
 // Scene is a Stash scene with the fields stash-janitor needs across both workflows.
 type Scene struct {
-	ID        string  `json:"id"`
-	Title     string  `json:"title"`
-	Code      string  `json:"code"`
-	Details   string  `json:"details"`
-	Director  string  `json:"director"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Code      string   `json:"code"`
+	Details   string   `json:"details"`
+	Director  string   `json:"director"`
 	URLs      []string `json:"urls"`
-	Date      string  `json:"date"`
-	Rating100 *int    `json:"rating100"`
-	Organized bool    `json:"organized"`
-	OCounter  int     `json:"o_counter"`
-	PlayCount *int    `json:"play_count"`
+	Date      string   `json:"date"`
+	Rating100 *int     `json:"rating100"`
+	Organized bool     `json:"organized"`
+	OCounter  int      `json:"o_counter"`
+	PlayCount *int     `json:"play_count"`
 
 	Studio     *Studio      `json:"studio"`
 	Tags       []Tag        `json:"tags"`
@@ -50,26 +50,26 @@ func (s *Scene) HasStashID() bool {
 
 // VideoFile is a Stash video file (subset of the VideoFile GraphQL type).
 type VideoFile struct {
-	ID         string        `json:"id"`
-	Path       string        `json:"path"`
-	Basename   string        `json:"basename"`
-	Size       int64         `json:"size"`
-	ModTime    string        `json:"mod_time"`
-	Format     string        `json:"format"`
-	Width      int           `json:"width"`
-	Height     int           `json:"height"`
-	Duration   float64       `json:"duration"`
-	VideoCodec string        `json:"video_codec"`
-	AudioCodec string        `json:"audio_codec"`
-	FrameRate  float64       `json:"frame_rate"`
-	BitRate    int           `json:"bit_rate"`
+	ID         string  `json:"id"`
+	Path       string  `json:"path"`
+	Basename   string  `json:"basename"`
+	Size       int64   `json:"size"`
+	ModTime    string  `json:"mod_time"`
+	Format     string  `json:"format"`
+	Width      int     `json:"width"`
+	Height     int     `json:"height"`
+	Duration   float64 `json:"duration"`
+	VideoCodec string  `json:"video_codec"`
+	AudioCodec string  `json:"audio_codec"`
+	FrameRate  float64 `json:"frame_rate"`
+	BitRate    int     `json:"bit_rate"`
 
 	Fingerprints []Fingerprint `json:"fingerprints"`
 }
 
 // Fingerprint is a single content hash for a file.
 type Fingerprint struct {
-	Type  string `json:"type"`  // oshash, md5, phash
+	Type  string `json:"type"` // oshash, md5, phash
 	Value string `json:"value"`
 }
 

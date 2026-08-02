@@ -150,7 +150,7 @@ func TestMetadataQualityConflictDetection(t *testing.T) {
 	}
 
 	scenes := []store.SceneGroupScene{
-		{SceneID: "loQual", HasStashID: true, Width: 1280, Height: 720},  // metadata, lower res
+		{SceneID: "loQual", HasStashID: true, Width: 1280, Height: 720},   // metadata, lower res
 		{SceneID: "hiQual", HasStashID: false, Width: 3840, Height: 2160}, // no metadata, higher res
 	}
 	d := s.DecideScenes(scenes)

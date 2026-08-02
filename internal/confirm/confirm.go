@@ -17,9 +17,9 @@ import (
 
 // Summary describes what's about to happen, used in the prompt header.
 type Summary struct {
-	Action          string // e.g. "merge"
-	GroupCount      int
-	SceneCount      int
+	Action           string // e.g. "merge"
+	GroupCount       int
+	SceneCount       int
 	ReclaimableBytes int64
 }
 

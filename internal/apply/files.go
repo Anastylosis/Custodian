@@ -22,19 +22,19 @@ type FilesPlan struct {
 
 	// Per-scene actions: which file would become primary, which file IDs
 	// would be deleted, how many bytes would be freed.
-	Actions []FilesPlanAction
+	Actions          []FilesPlanAction
 	TotalReclaimable int64
 }
 
 // FilesPlanAction is one scene's worth of work in a FilesPlan.
 type FilesPlanAction struct {
-	SceneID         string
-	NewPrimaryFile  string   // file_id chosen as the new primary
-	NewPrimaryPath  string
-	WasPrimary      bool     // was this file already the primary?
-	LoserFileIDs    []string // file_ids to delete
-	LoserPaths      []string
-	LoserBytes      int64
+	SceneID        string
+	NewPrimaryFile string // file_id chosen as the new primary
+	NewPrimaryPath string
+	WasPrimary     bool     // was this file already the primary?
+	LoserFileIDs   []string // file_ids to delete
+	LoserPaths     []string
+	LoserBytes     int64
 }
 
 // PlanFiles walks the store and builds a FilesPlan from groups currently
@@ -108,25 +108,25 @@ func PrintFilesPlan(w io.Writer, p *FilesPlan, commit bool) error {
 
 // FilesReport is the per-scene outcome of ExecuteFiles.
 type FilesReport struct {
-	GroupID            int64
-	SceneID            string
-	NewPrimaryFileID   string
-	PrimaryWasSwapped  bool
-	FilesDeletedCount  int
-	BytesReclaimed     int64
-	Status             string // "success" | "skipped" | "failed"
-	Error              string
+	GroupID           int64
+	SceneID           string
+	NewPrimaryFileID  string
+	PrimaryWasSwapped bool
+	FilesDeletedCount int
+	BytesReclaimed    int64
+	Status            string // "success" | "skipped" | "failed"
+	Error             string
 }
 
 // ExecuteFiles runs the files-apply pipeline for every action in the plan.
 //
 // Per scene:
 //
-//   1. If the chosen primary differs from the current primary, call
-//      sceneUpdate(primary_file_id) to swap it.
-//   2. Call deleteFiles(loserFileIDs) to delete the loser files from disk
-//      via Stash. This is the actually-destructive step.
-//   3. Mark the file group applied in the local store.
+//  1. If the chosen primary differs from the current primary, call
+//     sceneUpdate(primary_file_id) to swap it.
+//  2. Call deleteFiles(loserFileIDs) to delete the loser files from disk
+//     via Stash. This is the actually-destructive step.
+//  3. Mark the file group applied in the local store.
 //
 // Per-scene errors are captured in the returned FilesReport slice and the
 // loop continues — at large library scale, one bad scene should not waste

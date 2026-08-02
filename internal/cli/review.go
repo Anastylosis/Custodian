@@ -3,10 +3,10 @@ package cli
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Wasylq/StashJanitor/internal/decide"
 	"github.com/Wasylq/StashJanitor/internal/store"
 	"github.com/Wasylq/StashJanitor/internal/tui"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 

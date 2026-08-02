@@ -57,7 +57,7 @@ func Scan(ctx context.Context, c *stash.Client, st *store.Store, cfg *config.Con
 
 	res := &ScanResult{ScanRunID: runID}
 	targetSeen := map[string]*store.OrganizePlan{} // target_path → first plan that claimed it
-	existingPaths := map[string]string{}            // path → scene_id for files already on disk
+	existingPaths := map[string]string{}           // path → scene_id for files already on disk
 	page := 1
 	totalScenes := -1
 

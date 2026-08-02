@@ -48,12 +48,12 @@ type OrphansOptions struct {
 
 // OrphansResult is the per-run summary returned by Orphans.
 type OrphansResult struct {
-	ScanRunID    int64
-	Endpoint     string
-	OrphansSeen  int
-	Matched      int
-	NoMatch      int
-	Skipped      int // already-looked-up scenes (Rescan=false)
+	ScanRunID   int64
+	Endpoint    string
+	OrphansSeen int
+	Matched     int
+	NoMatch     int
+	Skipped     int // already-looked-up scenes (Rescan=false)
 }
 
 // Orphans runs workflow C's scan-and-lookup pipeline.

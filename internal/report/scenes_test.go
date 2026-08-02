@@ -179,4 +179,3 @@ func TestFilterStatusesValidation(t *testing.T) {
 		t.Errorf("'all' should map to nil, got %v", got)
 	}
 }
-

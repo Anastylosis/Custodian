@@ -24,12 +24,12 @@ type FilesOptions struct {
 
 // FilesResult is what the cli prints after a successful scan.
 type FilesResult struct {
-	ScanRunID    int64
-	SceneCount   int
-	NewGroups    int
-	Decided      int
-	NeedsReview  int
-	Dismissed    int
+	ScanRunID   int64
+	SceneCount  int
+	NewGroups   int
+	Decided     int
+	NeedsReview int
+	Dismissed   int
 }
 
 // Files runs workflow B's scan-and-decide pipeline.

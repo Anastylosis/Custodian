@@ -75,21 +75,21 @@ func PrintDeletePlan(w io.Writer, p *DeletePlan, commit bool) error {
 
 // DeleteReport is the per-group outcome of ExecuteDelete.
 type DeleteReport struct {
-	GroupID         int64
-	KeeperSceneID   string
-	LoserSceneIDs   []string
-	Status          string // "success" | "skipped" | "failed"
-	Error           string
-	BytesReclaimed  int64
+	GroupID        int64
+	KeeperSceneID  string
+	LoserSceneIDs  []string
+	Status         string // "success" | "skipped" | "failed"
+	Error          string
+	BytesReclaimed int64
 }
 
 // ExecuteDelete runs the hard-delete pipeline for every group in the plan.
 //
 // Per group:
-//   1. Call scenesDestroy with delete_file=true and delete_generated=true.
-//      Stash deletes the underlying files from disk and removes the scene
-//      records.
-//   2. Mark the group applied in the local store.
+//  1. Call scenesDestroy with delete_file=true and delete_generated=true.
+//     Stash deletes the underlying files from disk and removes the scene
+//     records.
+//  2. Mark the group applied in the local store.
 //
 // Per-group failures are captured in the returned slice and the loop
 // continues. Caller (cli) is responsible for the YES prompt before invoking
