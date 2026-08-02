@@ -577,9 +577,24 @@ stash-janitor subs scan --dir /data/webm --json report.json
 stash-janitor subs apply --dir /data/webm --commit
 ```
 
-`--dir` is a **Stash-space path** (`/data/...`), translated through the same
-`sidecars.path_map`, so the folder can be local, on a mount, or reached over
-SSH.
+### Where the subtitles are
+
+`--dir` can point anywhere:
+
+| Folder | What happens |
+|---|---|
+| On this machine (`~/Downloads/Subs`) | read locally, even if the library is remote |
+| Inside the library (`/data/webm`) | translated through `sidecars.path_map` |
+| Elsewhere on the library host | used as-is, and it says so |
+
+There is no flag for this — a directory that exists on this machine is read
+locally, otherwise it is treated as a path on the library backend.
+
+**Subtitles and library can be on different machines.** `subs apply` streams
+each file across and removes the original, so a folder on your desktop can feed
+a library on a NAS in one command. The transfer lands on a temporary name
+first: a half-written subtitle at the real path would be indexed by Stash as a
+valid caption.
 
 ### How matching works
 
@@ -599,9 +614,27 @@ Three independent signals are combined:
 |---|---|---|
 | Studio / JAV code | +60 | `VENU-765`, `RCTD-590` — near-decisive when present |
 | Exact filename | +100 | The subtitle is already named after the video |
-| Title similarity | +0…70 | After stripping scraper noise and folding `step` |
+| Name similarity | +0…70 | Scene **title** and **filename** scored separately, better wins |
 | **Runtime** | +0…45, −30 | The subtitle's last cue vs. the scene duration |
 | Matching date | +25 | `YYYY-MM-DD` in the filename vs. the scene date |
+| Creator agreement | +20 | Narrows the field; never decides on its own |
+
+**Title and filename are compared independently.** Libraries carry the
+identifying information in one place or the other: in a measured 61k-scene
+library 52% of scenes had no title at all and relied entirely on a structured
+filename, while a Stash-Box tagged library is the reverse — good titles beside
+filenames like `1080p.wmv`. Scoring a merged blob served neither. The report
+tells you which won: `title 100%` or `filename 57%`.
+
+**Creator names come from your own library.** Performer and studio names plus
+their aliases are fetched from Stash and squashed into handles, which are split
+out of name similarity so two unrelated clips by one creator do not look alike.
+Nothing is hard-coded, so it stays correct as your library grows.
+
+**Folder names are a hint.** If subtitles are filed under a performer or studio
+folder, that names the creator even when the filename is a bare title. Folders
+contribute creator evidence only, never title evidence — a directory says who,
+not what.
 
 **Runtime is what makes this trustworthy.** Two scenes can share a title, a
 performer and a studio, but not a length. In practice a correct match lands
@@ -647,6 +680,13 @@ guessed at, because a wrong caption tag is worse than none.
 
 ### What it will not do
 
+- **Stash only reads `srt` and `vtt` captions.** Other formats in
+  `sidecars.extensions` (`ass`, `ssa`, `sub`, `idx`, `smi`) are still moved so
+  they travel with their video, but Stash will not display them. Verified on a
+  live library: 1,019 registered captions, every one `srt`, and a correctly
+  placed `.ass` file ignored.
+- **A subtitle whose language cannot be detected is left alone**, not guessed
+  at — a wrong caption tag is worse than none.
 - It never overwrites an existing file.
 - It never deletes anything. Two subtitles resolving to the same destination —
   duplicate downloads of one transcript — are resolved by keeping the larger

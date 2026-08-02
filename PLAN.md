@@ -759,11 +759,38 @@ Rationale for specific choices:
 - **Nothing is ever deleted.** Duplicate transcripts resolving to one
   destination keep the larger (fuller) file; the other is reported in place.
 
-### 15.5 Known gaps
+### 15.5 Cross-backend moves
+
+Placing a subtitle originally required source and destination to be the same
+filesystem, which failed the most common deployment: Stash and its storage on a
+NAS, stash-janitor on a workstation. The SSH backend could read and report but
+never place anything.
+
+The alternative considered was making users stage files onto the library host
+by hand. Rejected: it breaks the feature's premise ("point at a folder"),
+leaves a staging directory inside the library for Stash to index, and pushes
+cleanup onto the user. `vfs.Move` streams between two backends instead, and
+`subs` infers the source — a `--dir` that exists on this machine is read
+locally even when the library is remote, so no new flag or mode was needed.
+
+### 15.6 Stash only reads srt and vtt
+
+Verified against a live library: 1,019 registered captions, all `srt`, and a
+correctly named `.ass` file sitting beside its video that Stash ignored.
+
+Other formats stay in `sidecars.extensions` so they travel with their video
+rather than being stranded by an organize move, but placing one will never
+produce a visible caption. Documented rather than silently dropped, because a
+file that moves and then does nothing looks like success.
+
+### 15.7 Known gaps
 
 - The matcher does not use performer identity as a signal. A real case
   was correctly rejected by a human on creator mismatch but scores as plausible
   here; it lands in `AMBIGUOUS`, which is safe but not maximally precise.
   Creator agreement is now scored, but disagreement is not yet penalised.
-- `subs scan` and `subs apply` each fetch the whole library. At 61k scenes that
-  is roughly a minute per invocation. Caching into the store would fix it.
+- `subs scan` and `subs apply` each fetch the whole library, plus performer and
+  studio names. At 61k scenes that is roughly a minute per invocation. Caching
+  into the store would fix it.
+- Creator agreement is scored, but creator *disagreement* is not penalised, so
+  a well-titled scene by the wrong performer can still rank highly.
