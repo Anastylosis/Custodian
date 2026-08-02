@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/Wasylq/StashJanitor/internal/confirm"
+	"github.com/Wasylq/StashJanitor/internal/sidecar"
 	"github.com/Wasylq/StashJanitor/internal/stash"
 	"github.com/Wasylq/StashJanitor/internal/store"
 )
@@ -67,10 +68,28 @@ type ApplyReport struct {
 	Succeeded int
 	Failed    int
 	Failures  []string
+
+	// Sidecar totals across every file in the batch.
+	SidecarsMoved   int
+	SidecarsSkipped int
+	SidecarsFailed  int
+	// SidecarNotes carries the per-file detail worth surfacing: skips and
+	// failures. Successful moves are counted, not listed, to keep the report
+	// readable on large batches.
+	SidecarNotes []string
 }
 
-// Execute runs the moveFiles mutations for each actionable plan row.
-func Execute(ctx context.Context, c *stash.Client, st *store.Store, plan *ApplyPlan) (*ApplyReport, error) {
+// Execute runs the moveFiles mutations for each actionable plan row, and
+// relocates each file's sidecars alongside it.
+//
+// Ordering matters. The sidecar plan is computed BEFORE the video is moved,
+// while the source directory is still intact — that is the only moment the
+// competing-video check can be made correctly. The sidecars are then moved
+// after Stash confirms the video move, so a failed moveFiles never leaves
+// subtitles stranded in a directory their video never reached.
+//
+// mover may be nil, which disables sidecar handling entirely.
+func Execute(ctx context.Context, c *stash.Client, st *store.Store, plan *ApplyPlan, mover *sidecar.Mover) (*ApplyReport, error) {
 	if c == nil || st == nil || plan == nil {
 		return nil, errors.New("organize.Execute: nil dependency")
 	}
@@ -83,6 +102,15 @@ func Execute(ctx context.Context, c *stash.Client, st *store.Store, plan *ApplyP
 	for _, p := range all {
 		targetDir := filepath.Dir(p.TargetPath)
 		targetBase := filepath.Base(p.TargetPath)
+
+		// Resolve sidecars first: the source directory is about to change.
+		sideMoves, sideErr := mover.Plan(ctx, p.CurrentPath, p.TargetPath)
+		if sideErr != nil {
+			slog.Warn("could not resolve sidecars; moving the video anyway",
+				"file_id", p.FileID, "path", p.CurrentPath, "error", sideErr)
+			report.SidecarNotes = append(report.SidecarNotes,
+				fmt.Sprintf("%s: could not inspect sidecars: %v", p.CurrentPath, sideErr))
+		}
 
 		err := c.MoveFiles(ctx, stash.MoveFilesInput{
 			IDs:                 []string{p.FileID},
@@ -101,6 +129,23 @@ func Execute(ctx context.Context, c *stash.Client, st *store.Store, plan *ApplyP
 			continue
 		}
 
+		if len(sideMoves) > 0 {
+			res := mover.Apply(ctx, sideMoves)
+			report.SidecarsMoved += len(res.Moved)
+			report.SidecarsSkipped += len(res.Skipped)
+			report.SidecarsFailed += len(res.Failed)
+			for _, s := range res.Skipped {
+				report.SidecarNotes = append(report.SidecarNotes,
+					fmt.Sprintf("skipped %s: %s", s.Move.SrcStash, s.Reason))
+			}
+			for _, f := range res.Failed {
+				slog.Error("sidecar move failed",
+					"src", f.Move.SrcLocal, "dst", f.Move.DstLocal, "error", f.Err)
+				report.SidecarNotes = append(report.SidecarNotes,
+					fmt.Sprintf("FAILED %s → %s: %v", f.Move.SrcStash, f.Move.DstStash, f.Err))
+			}
+		}
+
 		if err := st.MarkOrganizePlanApplied(ctx, p.ID); err != nil {
 			slog.Error("mark-applied failed after successful move",
 				"file_id", p.FileID, "error", err)
@@ -115,13 +160,54 @@ func PrintApplyReport(w io.Writer, r *ApplyReport) error {
 	fmt.Fprintf(w, "\n=== organize apply complete ===\n")
 	fmt.Fprintf(w, "  succeeded: %d\n", r.Succeeded)
 	fmt.Fprintf(w, "  failed:    %d\n", r.Failed)
+	if r.SidecarsMoved+r.SidecarsSkipped+r.SidecarsFailed > 0 {
+		fmt.Fprintf(w, "  sidecars moved:   %d\n", r.SidecarsMoved)
+		if r.SidecarsSkipped > 0 {
+			fmt.Fprintf(w, "  sidecars skipped: %d\n", r.SidecarsSkipped)
+		}
+		if r.SidecarsFailed > 0 {
+			fmt.Fprintf(w, "  sidecars failed:  %d\n", r.SidecarsFailed)
+		}
+	}
 	if r.Failed > 0 {
 		fmt.Fprintln(w, "\nFailures:")
 		for _, f := range r.Failures {
 			fmt.Fprintf(w, "  %s\n", f)
 		}
 	}
+	if len(r.SidecarNotes) > 0 {
+		fmt.Fprintln(w, "\nSidecar notes:")
+		for _, n := range r.SidecarNotes {
+			fmt.Fprintf(w, "  %s\n", n)
+		}
+	}
+	if r.SidecarsMoved > 0 {
+		fmt.Fprintln(w, "\nSidecars moved. Run a Stash scan over the affected folders so the")
+		fmt.Fprintln(w, "captions are re-attached to their scenes.")
+	}
 	return nil
+}
+
+// PreviewSidecars resolves the sidecars a dry run would move, so `organize
+// apply` without --commit reports them rather than surprising the user at
+// commit time. Errors are returned as notes instead of aborting: an
+// unreachable library should not stop the caller previewing the video moves.
+func PreviewSidecars(ctx context.Context, plan *ApplyPlan, mover *sidecar.Mover) (int, []string) {
+	if mover == nil || plan == nil {
+		return 0, nil
+	}
+	var total int
+	var notes []string
+	all := append(append([]*store.OrganizePlan{}, plan.Moves...), plan.Renames...)
+	for _, p := range all {
+		moves, err := mover.Plan(ctx, p.CurrentPath, p.TargetPath)
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("%s: %v", p.CurrentPath, err))
+			continue
+		}
+		total += len(moves)
+	}
+	return total, notes
 }
 
 // PrintReport renders the per-file organize report.

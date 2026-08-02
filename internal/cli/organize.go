@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wasylq/StashJanitor/internal/confirm"
 	"github.com/Wasylq/StashJanitor/internal/organize"
+	"github.com/Wasylq/StashJanitor/internal/sidecar"
 	"github.com/spf13/cobra"
 )
 
@@ -28,9 +29,16 @@ date, resolution). Files that are already in the right place are
 skipped. Files that need to move are proposed as a plan you can
 review before committing.
 
-All moves go through Stash's moveFiles API — stash-janitor never touches the
-filesystem directly. Same safety model: dry-run default, --commit
-required, interactive YES prompt on commit.
+Video moves go through Stash's moveFiles API. Same safety model as every
+other workflow: dry-run default, --commit required, interactive YES
+prompt on commit.
+
+Sidecar files (subtitles, and anything else sharing a video's stem) are
+moved by stash-janitor itself, because Stash does not index them as files
+and moveFiles cannot carry them. That is the one place this tool touches
+the filesystem, and it needs sidecars.path_map configured so it can find
+the library. Run "stash-janitor sidecars check" to verify. Sidecars never
+overwrite an existing file; conflicts are reported and left alone.
 
 Recommended: run stash-janitor scenes apply (dedup) and stash-janitor orphans scan
 (metadata recovery) BEFORE organize, so more files have the metadata
@@ -129,7 +137,7 @@ func runOrganizeReport(cmd *cobra.Command, args []string) error {
 }
 
 func runOrganizeApply(cmd *cobra.Command, args []string) error {
-	_, st, client, cleanup, err := loadConfigAndStore()
+	cfg, st, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
 	}
@@ -138,6 +146,14 @@ func runOrganizeApply(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	out := cmd.OutOrStdout()
 
+	// Sidecar support is optional; a nil mover disables it and every call
+	// site tolerates that.
+	mover, moverCleanup, err := sidecar.Build(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("%w\n\nRun `stash-janitor sidecars check` to diagnose, or set sidecars.enabled: false", err)
+	}
+	defer moverCleanup()
+
 	plan, err := organize.PlanApply(ctx, st)
 	if err != nil {
 		return err
@@ -145,10 +161,19 @@ func runOrganizeApply(cmd *cobra.Command, args []string) error {
 	if err := organize.PrintApplyPlan(out, plan, flagOrganizeApplyCommit); err != nil {
 		return err
 	}
+
+	total := len(plan.Moves) + len(plan.Renames)
+	if total > 0 && mover != nil {
+		n, notes := organize.PreviewSidecars(ctx, plan, mover)
+		fmt.Fprintf(out, "Sidecars to move: %d  (via %s)\n", n, mover.Describe())
+		for _, note := range notes {
+			fmt.Fprintf(out, "  ⚠ %s\n", note)
+		}
+	}
+
 	if !flagOrganizeApplyCommit {
 		return nil
 	}
-	total := len(plan.Moves) + len(plan.Renames)
 	if total == 0 {
 		return nil
 	}
@@ -166,7 +191,7 @@ func runOrganizeApply(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	report, err := organize.Execute(ctx, client, st, plan)
+	report, err := organize.Execute(ctx, client, st, plan, mover)
 	if err != nil {
 		return err
 	}

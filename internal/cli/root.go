@@ -29,9 +29,13 @@ It addresses two distinct problems:
   - Workflow A: cross-scene duplicates (separate Stash scenes with the same content)
   - Workflow B: within-scene multi-file cleanup (a single scene with multiple attached files)
 
-All destructive actions go through Stash's GraphQL API. The tool never touches the
-filesystem directly. The default action is always the safest one: dry-run for apply
-commands, tag-only for cross-scene duplicates, report-only for within-scene files.
+All destructive actions go through Stash's GraphQL API. The one exception is
+sidecar files (subtitles): Stash does not index them as files, so its moveFiles
+mutation cannot move them, and stash-janitor relocates those itself. See
+"stash-janitor sidecars check".
+
+The default action is always the safest one: dry-run for apply commands,
+tag-only for cross-scene duplicates, report-only for within-scene files.
 
 See PLAN.md for the full design.`,
 		SilenceUsage: true,
@@ -78,4 +82,3 @@ func setupLogger(w io.Writer, verbose int) {
 	})
 	slog.SetDefault(slog.New(handler))
 }
-
