@@ -14,6 +14,10 @@ StashJanitor solves three related problems:
 - **Workflow C — orphan metadata recovery.** Scenes with no stash-box
   metadata (no `stash_ids`). stash-janitor queries stash-box by phash, finds matches,
   and links them back so Stash's Scene Tagger can pull the full metadata.
+- **Workflow E — loose subtitles.** Subtitle files that Stash cannot see,
+  because they are not named after their video. stash-janitor matches them to
+  scenes using studio codes, title similarity and — decisively — the subtitle's
+  own runtime against the scene duration.
 
 All workflows fetch their data from Stash, score/match every candidate,
 persist decisions to a local SQLite cache, and let you review everything
@@ -52,6 +56,39 @@ All three workflows work end-to-end against Stash v0.31.0:
 | Stale-cache detection in `stash-janitor stats` | ✅ |
 | Orphans scan progress indicator with ETA | ✅ |
 | `stash-janitor organize scan` / `report` / `apply` | ✅ |
+| Sidecars: subtitles follow videos on move/rename | ✅ |
+| `stash-janitor sidecars check` (access + path-map doctor) | ✅ |
+| `stash-janitor subs scan` / `apply` (match loose subtitles) | ✅ |
+
+### Subtitles
+
+Stash does not index subtitles as files — it looks next to each video for
+`<stem>.srt` / `<stem>.<lang>.srt` at scan time and attaches what it finds to
+the scene. Captions therefore have no file ID, and Stash's `moveFiles` mutation
+(which takes `ids: [ID!]`) **cannot move them**. Any video that `organize`
+relocates would leave its subtitles behind, silently detaching the captions.
+
+StashJanitor handles both halves of that problem:
+
+```sh
+# Keep subtitles attached: they follow videos on move/rename, language intact.
+#   clip.en.srt -> 2024-01-01_New.Name_4k.en.srt
+stash-janitor sidecars check          # verify access + path mapping first
+
+# Fix subtitles that are ALREADY adrift: match them back to scenes.
+stash-janitor subs scan  --dir /data/webm
+stash-janitor subs apply --dir /data/webm --commit
+```
+
+Matching combines studio/JAV codes, title similarity, and — decisively — the
+subtitle's own runtime against the scene duration. Two scenes can share a
+title, performer and studio, but not a length: in practice the correct match
+lands within seconds while a same-titled decoy sits minutes away.
+
+This is the only part of the tool that touches the filesystem, so it needs to
+reach your library. It works against a local path, a mounted share (including
+Windows drive letters and UNC paths), or over SSH/SFTP when the library isn't
+mounted at all. See [MANUAL.md](MANUAL.md#sidecar-files-subtitles).
 
 See [MANUAL.md](MANUAL.md) for usage instructions and
 [PLAN.md](PLAN.md) for the design and rationale.

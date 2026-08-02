@@ -8,15 +8,23 @@ Author: collaborative planning session, 2026-04-09
 A single static Go binary that finds duplicate video scenes in your Stash
 library and helps you reclaim disk space safely. It runs anywhere (NAS sidecar
 or desktop), talks to Stash purely over GraphQL with an optional API key, and
-**never touches the filesystem directly** — all destructive actions go through
-Stash's own API so the container's view of paths is the only one that matters.
+goes through Stash's own API for every mutation it can, so the container's view
+of paths is normally the only one that matters.
+
+**One deliberate exception: sidecar files.** Stash does not index subtitles as
+files — it discovers them next to a video at scan time and attaches them as a
+property of the scene, so they have no file ID. `moveFiles` takes `ids: [ID!]`
+and therefore *cannot* move a subtitle. Keeping captions attached across a move
+or rename requires real filesystem access, which is why `sidecars.path_map`
+exists and why a `vfs` abstraction (local / SSH) was introduced. See §15.
 
 ## 2. Non-goals (v1)
 
 - Identifying metadata-less orphans via stash-box (Phase 3 — use Stash's
   built-in Scene Tagger in the meantime)
 - Interactive TUI / web UI (Phase 2 / Phase 3)
-- Any direct filesystem operations (we always go through Stash mutations)
+- Any direct filesystem operations beyond sidecar files (see §1 — subtitles
+  cannot be moved through Stash's API at all, so there is no alternative)
 - Integration with other media servers (you don't have any)
 - Cross-scene hard delete via `scenesDestroy(delete_file: true)` — Phase 2
   power-user mode. With merge available in Phase 1, hard delete is rarely
@@ -646,3 +654,105 @@ Items shipped as part of Phase 1.x after the original PLAN was written:
 - [x] **Default filename regex extended** to recognize `_<digits>`
       duplicate-import suffixes (`_1080p_1.mp4`) and 8K/2K/6K resolution
       shorthand.
+
+## 15. Sidecar files and subtitle matching
+
+### 15.1 The constraint that forced this design
+
+Stash does **not** store subtitles as files. During a scan it looks next to each
+video for `<stem>.srt` / `<stem>.<lang>.srt` and attaches whatever it finds as a
+property of the scene. A caption has no file ID and no row in the file table.
+
+Verified against Stash v0.31.1 with 61k scenes:
+
+| `findFiles(path INCLUDES …)` | count |
+|---|---|
+| `.mp4` | 51,494 |
+| `.srt` | **0** |
+| exact path of a caption the UI was actively displaying | **0** |
+
+`moveFiles(input: {ids: [ID!]})` cannot be given a subtitle. There is no
+mutation that can. Any feature that keeps captions attached across a move must
+therefore touch the filesystem, and no amount of API work avoids it.
+
+The observed failure this fixes: `organize` moved 61k scenes' worth of videos
+through `moveFiles`; Stash moved only what it had IDs for; 54 subtitle files
+stayed behind in their old folders and silently detached from their scenes.
+
+### 15.2 Locked-in decisions
+
+- **A `vfs.FS` interface, not direct `os` calls.** Backends: `local` (covers
+  running on the NAS, a Linux mount, a Windows mapped drive or UNC path) and
+  `ssh` (SFTP). An in-memory backend makes the move planner unit-testable
+  without a filesystem.
+- **SFTP, not shelling out to `ssh`/`mv`.** Real filenames in this library
+  contain spaces, `+`, `(`, `'` and `&`. Shell interpolation is a correctness
+  hazard, not just a style preference.
+- **`pathmap` is mandatory and explicit.** Stash reports container paths
+  (`/data/...`). There is no reliable way to auto-detect the local equivalent,
+  and guessing wrong means moving files somewhere unexpected. It is configured,
+  validated by `sidecars check`, and a path with no rule is a hard error rather
+  than a silent skip.
+- **Never overwrite.** A clobbered subtitle is unrecoverable; one left behind is
+  not. Occupied destinations are skipped and reported.
+- **Sidecars are planned before the video moves, applied after.** Planning needs
+  the source directory intact — that is the only moment the "does a more
+  specific video own this subtitle" check can be made. Applying afterwards means
+  a failed `moveFiles` never strands subtitles in a folder their video never
+  reached.
+- **A failed sidecar never fails the video move.** Counted and reported instead.
+- **Language suffixes are preserved.** `x.en.srt` → `<new>.en.srt`. A bare
+  `<stem>.srt` is filed by Stash as language `00`, and two unknown-language
+  tracks collide on one filename — so preserving the tag is what makes
+  multi-language captions possible at all.
+
+### 15.3 Sidecar ownership
+
+Given `Foo.mp4`, `Foo.part2.mp4` and `Foo.part2.srt`, the subtitle is a valid
+suffix-match for both videos: `.part2.srt` after stem `Foo`, and `.srt` after
+stem `Foo.part2`. It belongs to the **longer, more specific** stem. Without this
+check, moving `Foo.mp4` would steal the other video's subtitle. Regression test:
+`TestPlan_DoesNotStealMoreSpecificVideosSidecar`.
+
+### 15.4 Matching loose subtitles (`subs`)
+
+For subtitles that are already adrift, filename comparison is not enough — real
+pairs share almost no text:
+
+```
+StudioHandleXXX_Mommy-and-Son-Breeding-Season+(transcribed+on+25-Jul-2024).srt
+  → 2023-05-23_Some.Performer-stepMommy.and.stepSon.Breeding.Season_1080p.mp4
+```
+
+Three independent signals are combined: studio/JAV code, normalised title
+tokens, and the subtitle's runtime versus the scene duration.
+
+**Runtime is the decisive signal.** Two scenes can share a title, performer and
+studio but not a length. Measured on the real library, the correct match for
+`Nurse River Soothes The Aching Patient` was +2s away while an identically
+titled decoy was +1377s — a distinction no string metric can make.
+
+Rationale for specific choices:
+
+- **`step` prefix folding.** `stepMommy` and `Mommy` are one word for matching.
+  Omitting this caused two genuine matches to be reported as unmatched on the
+  first pass over the real library.
+- **Creator handles are dropped** (`thehousenextdoor1`, `StudioHandleXXX`). They
+  appear in the subtitle name but not the scene title, and would otherwise let
+  two unrelated clips from one creator score as a match.
+- **The gap to the runner-up gates the verdict.** A high score with a near-tie
+  is precisely where an automatic choice is wrong, so it becomes `AMBIGUOUS`.
+- **Language is detected from file contents, never the filename**, which is
+  frequently absent or wrong. An undetectable language means the file is left
+  alone: a wrong caption tag is worse than none.
+- **Nothing is ever deleted.** Duplicate transcripts resolving to one
+  destination keep the larger (fuller) file; the other is reported in place.
+
+### 15.5 Known gaps
+
+- The matcher does not use performer identity as a signal. A real case
+  (`A Mother's Obsession` vs. an Wren Ashby scene) was correctly rejected by a
+  human on creator mismatch but scores as plausible here; it lands in
+  `AMBIGUOUS`, which is safe but not maximally precise.
+- `subs scan` and `subs apply` each fetch the whole library. At 61k scenes that
+  is roughly a minute per invocation. Caching into the store would fix it.

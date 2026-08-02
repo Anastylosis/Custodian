@@ -417,6 +417,242 @@ Folder parts use `folder_space_char` (default: space), filename parts
 use `space_char` (default: dot). So `Some Performer` becomes the folder
 `Some Performer/` but the filename part `Some.Performer`.
 
+## Sidecar files (subtitles)
+
+A **sidecar** is a file that shares a video's name:
+
+```
+clip_1080p.mp4
+clip_1080p.en.srt
+clip_1080p.es.srt
+```
+
+### Why this needs special handling
+
+Stash does **not** index subtitles as files. At scan time it looks next to each
+video for `<stem>.srt` or `<stem>.<lang>.srt` and attaches whatever it finds as
+a *property of the scene*. A caption therefore has no file ID, no row in the
+file table, no identity of its own.
+
+You can see this on any Stash instance — a caption that the UI is actively
+displaying returns nothing from `findFiles`:
+
+| `findFiles` query | count |
+|---|---|
+| path includes `.mp4` | 51,494 |
+| path includes `.srt` | **0** |
+
+`moveFiles` — the mutation `organize` uses — takes `ids: [ID!]`. There is
+nothing to pass it for a subtitle. **This is an API limitation, not a design
+choice.** Before this feature existed, `organize` moved a video through
+`moveFiles`, Stash moved only what it had an ID for, and every subtitle stayed
+behind. The caption silently vanished from the scene.
+
+So stash-janitor moves sidecars itself. This is the **only** part of the tool
+that touches the filesystem directly, and it is why the config below exists.
+
+### What it does
+
+When `organize` moves or renames a video, its sidecars follow, keeping their
+language suffix:
+
+```
+tmp2/clip_1080p.mp4      →  Some Performer/2024-01-01_Clip_4k.mp4     (via Stash)
+tmp2/clip_1080p.en.srt   →  Some Performer/2024-01-01_Clip_4k.en.srt  (via stash-janitor)
+tmp2/clip_1080p.es.srt   →  Some Performer/2024-01-01_Clip_4k.es.srt  (via stash-janitor)
+```
+
+Preserving `.en` / `.es` is what keeps multi-language captions working — a bare
+`<stem>.srt` is filed by Stash as language `00` (unknown), and two unknown-
+language tracks would collide on the same filename.
+
+### Configuration
+
+```yaml
+sidecars:
+  enabled: true
+  extensions: [srt, ass, ssa, vtt, sub, idx, smi]
+  access: auto          # auto | local | ssh | off
+  path_map:
+    - stash: /data
+      local: /share/main/Videos
+```
+
+**`path_map` is the part people get wrong.** Stash reports paths as seen from
+inside its own process — usually `/data/...` in a Docker deployment, which
+often exists nowhere else. You must map that onto something the machine running
+stash-janitor can reach. Longest matching prefix wins.
+
+| Where stash-janitor runs | `path_map` |
+|---|---|
+| On the NAS itself | `stash: /data` → `local: /share/main/Videos` |
+| Linux box, share mounted | `stash: /data` → `local: /mnt/nas/Videos` |
+| Windows, mapped drive | `stash: /data` → `local: 'Z:\Videos'` |
+| Windows, UNC path | `stash: /data` → `local: '\\nas\main\Videos'` |
+| Same filesystem as Stash | leave `path_map` empty |
+
+Windows paths are handled natively: backslashes, drive letters and UNC roots
+are all understood, and prefix matching is case-insensitive for them.
+
+### When the library isn't mounted
+
+If stash-janitor runs somewhere with no access to the library — a workstation,
+with the files on a NAS — use the SSH backend. It speaks SFTP rather than
+shelling out to `ssh`, which matters for media filenames containing spaces,
+`+`, `(`, `'` and `&`.
+
+```yaml
+sidecars:
+  access: ssh
+  path_map:
+    - stash: /data
+      local: /share/main/Videos    # the path on the NAS
+  ssh:
+    host: nas.local
+    user: me
+    key_file: ~/.ssh/id_ed25519    # or leave empty to use ssh-agent
+    password_env: SJ_SSH_PASSWORD  # secrets come from the environment
+    accept_new_host_key: false
+```
+
+Authentication is tried in the order you would expect: explicit key, then
+ssh-agent, then `~/.ssh/id_ed25519` / `id_rsa` / `id_ecdsa`, then password.
+Host keys are verified against `~/.ssh/known_hosts`. `accept_new_host_key`
+trusts an *unknown* host on first contact; a **changed** key on an already-known
+host is always rejected regardless of the setting.
+
+### Verify it before relying on it
+
+```sh
+stash-janitor sidecars check
+```
+
+This resolves real scene paths through your `path_map` and reads them back, so
+a mapping that parses fine but points nowhere fails loudly here rather than
+silently skipping files during an apply.
+
+```
+✓ backend reachable: ssh://me@nas.local:22
+
+Testing 5 path(s):
+  ✓ /data/Some Performer/SomeHandle_Al telefono con mi marido 1080p.mp4
+      sidecar: SomeHandle_Al telefono con mi marido 1080p.en.srt
+      sidecar: SomeHandle_Al telefono con mi marido 1080p.es.srt
+
+readable: 5   failed: 0   sidecars found: 2
+```
+
+Use `--path /data/some/specific.mp4` to probe one file.
+
+### Safety
+
+- **Never overwrites.** If the destination already exists the sidecar is left
+  in place and reported. A clobbered subtitle is unrecoverable; one left behind
+  is not.
+- **The video move still succeeds** if a sidecar fails. Failures are counted
+  and listed rather than aborting the batch.
+- **Dry run shows sidecars too** — `organize apply` without `--commit` reports
+  how many will move, so there are no surprises at commit time.
+- **Cross-filesystem moves** fall back to copy-then-delete, writing to a
+  temporary name first so an interrupted copy cannot leave a truncated subtitle
+  where Stash would pick it up.
+
+After applying, run a Stash scan over the affected folders so the captions are
+re-attached.
+
+## Workflow E: Subs — match loose subtitles to scenes
+
+`organize` keeps subtitles attached going forward. `subs` fixes the ones that
+are *already* adrift: files that were never named after their video, or that got
+left behind before sidecar support existed.
+
+```sh
+# What belongs where? Nothing is moved.
+stash-janitor subs scan --dir /data/webm
+
+# Machine-readable too.
+stash-janitor subs scan --dir /data/webm --json report.json
+
+# Place the confident ones.
+stash-janitor subs apply --dir /data/webm --commit
+```
+
+`--dir` is a **Stash-space path** (`/data/...`), translated through the same
+`sidecars.path_map`, so the folder can be local, on a mount, or reached over
+SSH.
+
+### How matching works
+
+Filenames alone are not enough. These are real pairs:
+
+```
+StudioHandleXXX_Mommy-and-Son-Breeding-Season+(transcribed+on+25-Jul-2024).srt
+  → 2023-05-23_Some.Performer-stepMommy.and.stepSon.Breeding.Season_1080p.mp4
+
+thehousenextdoor2024 - The Reluctant Dog Sitter - Compressed.srt
+  → The-Reluctant-Pet-Sitter-Part-1.mp4
+```
+
+Three independent signals are combined:
+
+| Signal | Weight | Notes |
+|---|---|---|
+| Studio / JAV code | +60 | `VENU-765`, `RCTD-590` — near-decisive when present |
+| Exact filename | +100 | The subtitle is already named after the video |
+| Title similarity | +0…70 | After stripping scraper noise and folding `step` |
+| **Runtime** | +0…45, −30 | The subtitle's last cue vs. the scene duration |
+| Matching date | +25 | `YYYY-MM-DD` in the filename vs. the scene date |
+
+**Runtime is what makes this trustworthy.** Two scenes can share a title, a
+performer and a studio, but not a length. In practice a correct match lands
+within a couple of seconds while a same-titled decoy sits minutes away:
+
+```
+Nurse+River+Soothes+the+Aching+Patient+WM+(transcribed…).srt   18:03
+  → #55739  Nurse River Soothes The Aching Patient   10:54   +2s     ✓
+    #75175  Nurse River Soothes The Aching Patient   33:49   +1377s  ✗
+```
+
+Names were a dead tie; runtime was not.
+
+A subtitle that runs *past* the end of a video counts as evidence against the
+pairing, not for it — though a few seconds of overrun is tolerated, since the
+measurement takes the maximum timestamp, which includes cue *end* times.
+
+### Verdicts
+
+| Verdict | Meaning | `subs apply` |
+|---|---|---|
+| `CONFIRMED` | Name and runtime agree, no rival close | moved |
+| `LIKELY` | Good evidence, weaker on one axis | moved only with `--include-likely` |
+| `AMBIGUOUS` | Several candidates too close to separate | left alone |
+| `UNMATCHED` | Nothing credible in the library | left alone |
+
+The gap to the runner-up matters as much as the absolute score: a high score
+with a near-tie is exactly the case where an automatic choice would be wrong,
+so it is reported as `AMBIGUOUS` for you to settle.
+
+Subtitles that are *already* correctly named next to their video are counted as
+"already attached" and skipped — they need no work.
+
+### Language detection
+
+`subs apply` names each file `<video-stem>.<lang>.srt`, and the language is
+detected from the subtitle's **own text**, not its filename — filenames are
+frequently wrong or silent about it. Script detection handles CJK, Hangul and
+Cyrillic; the Latin-script languages are separated by function-word frequency.
+
+If the language cannot be determined the subtitle is **left alone** rather than
+guessed at, because a wrong caption tag is worse than none.
+
+### What it will not do
+
+- It never overwrites an existing file.
+- It never deletes anything. Two subtitles resolving to the same destination —
+  duplicate downloads of one transcript — are resolved by keeping the larger
+  (fuller) one; the other is reported and left where it is.
+- `subs scan` is entirely read-only.
+
 ## Safety features
 
 - **Filename-info-loss safety net.** When the scorer picks a higher-quality
