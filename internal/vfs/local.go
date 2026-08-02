@@ -163,3 +163,27 @@ func copyThenRemove(src, dst string) error {
 	}
 	return nil
 }
+
+func (l *Local) Create(ctx context.Context, p string) (io.WriteCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return nil, fmt.Errorf("mkdir for %q: %w", p, err)
+	}
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("create %q: %w", p, err)
+	}
+	return f, nil
+}
+
+func (l *Local) Remove(ctx context.Context, p string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %q: %w", p, err)
+	}
+	return nil
+}

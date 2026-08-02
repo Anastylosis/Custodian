@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Wasylq/StashJanitor/internal/config"
@@ -94,10 +96,20 @@ Stash scan over the affected folders so the captions are picked up.`,
 	return cmd
 }
 
-// subsSetup opens the filesystem backend and loads the library index, which
-// both subcommands need.
+// subsEnv is everything both subcommands need. libFS is where the library
+// lives; srcFS is where the subtitles being scanned live. They are usually the
+// same, but not when the library is on a NAS and the subtitles are on the
+// machine running the tool.
+type subsEnv struct {
+	libFS vfs.FS
+	srcFS vfs.FS
+	mp    *pathmap.Mapper
+	ix    *subs.Index
+	dir   string // the source directory, resolved for srcFS
+}
+
 func subsSetup(ctx context.Context, cmd *cobra.Command, cfg *config.Config, client *stash.Client) (
-	fs vfs.FS, mp *pathmap.Mapper, ix *subs.Index, cleanup func(), err error,
+	env *subsEnv, cleanup func(), err error,
 ) {
 	out := cmd.OutOrStdout()
 	cleanup = func() {}
@@ -106,22 +118,41 @@ func subsSetup(ctx context.Context, cmd *cobra.Command, cfg *config.Config, clie
 	for _, r := range cfg.Sidecars.PathMap {
 		rules = append(rules, pathmap.Rule{StashPrefix: r.Stash, LocalPrefix: r.Local})
 	}
-	mp, err = pathmap.New(rules)
+	mp, err := pathmap.New(rules)
 	if err != nil {
-		return nil, nil, nil, cleanup, fmt.Errorf("sidecars.path_map: %w", err)
+		return nil, cleanup, fmt.Errorf("sidecars.path_map: %w", err)
 	}
 
-	fs, cleanup, err = openSubsFS(ctx, cfg)
+	libFS, cleanup, err := openSubsFS(ctx, cfg)
 	if err != nil {
-		return nil, nil, nil, func() {}, err
+		return nil, func() {}, err
 	}
-	fmt.Fprintf(out, "reading files via %s\n", fs.Describe())
+
+	// Where do the subtitles actually live? A folder that exists on this
+	// machine is read locally even when the library is remote, so "point at a
+	// folder" means the same thing wherever the folder happens to be.
+	srcFS, dir := libFS, flagSubsDir
+	if local, ok := localDirCandidate(flagSubsDir); ok {
+		srcFS, dir = vfs.NewLocal(), local
+	} else if mapped, mErr := mp.ToLocal(flagSubsDir); mErr == nil {
+		dir = mapped
+	} else {
+		fmt.Fprintf(out, "no path_map rule covers %s — reading it as a path on %s\n",
+			flagSubsDir, libFS.Describe())
+	}
+
+	if srcFS == libFS {
+		fmt.Fprintf(out, "reading subtitles via %s\n", srcFS.Describe())
+	} else {
+		fmt.Fprintf(out, "reading subtitles via %s, library on %s\n",
+			srcFS.Describe(), libFS.Describe())
+	}
 
 	fmt.Fprintln(out, "fetching performer and studio names…")
 	names, err := client.CreatorNames(ctx)
 	if err != nil {
 		cleanup()
-		return nil, nil, nil, func() {}, err
+		return nil, func() {}, err
 	}
 	vocab := subs.NewVocab(names)
 
@@ -129,11 +160,32 @@ func subsSetup(ctx context.Context, cmd *cobra.Command, cfg *config.Config, clie
 	scenes, err := loadSceneRefs(ctx, client, flagSubsPerPage)
 	if err != nil {
 		cleanup()
-		return nil, nil, nil, func() {}, err
+		return nil, func() {}, err
 	}
-	ix = subs.NewIndex(scenes, vocab)
+	ix := subs.NewIndex(scenes, vocab)
 	fmt.Fprintf(out, "indexed %d scenes, %d creator words\n\n", ix.Len(), vocab.Len())
-	return fs, mp, ix, cleanup, nil
+	return &subsEnv{libFS: libFS, srcFS: srcFS, mp: mp, ix: ix, dir: dir}, cleanup, nil
+}
+
+// localDirCandidate reports whether the given path is a directory on this
+// machine, expanding a leading ~.
+func localDirCandidate(p string) (string, bool) {
+	if p == "" {
+		return "", false
+	}
+	if strings.HasPrefix(p, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, strings.TrimPrefix(p, "~"))
+		}
+	}
+	if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return p, true
+		}
+		return abs, true
+	}
+	return "", false
 }
 
 // openSubsFS builds the backend from the sidecars config, ignoring
@@ -226,23 +278,11 @@ func trimExt(name string) string {
 
 // collectAndMatch scans the folder and matches everything that is not already
 // attached to a scene.
-func collectAndMatch(ctx context.Context, cmd *cobra.Command, fs vfs.FS, mp *pathmap.Mapper, ix *subs.Index, cfg *config.Config) (
+func collectAndMatch(ctx context.Context, cmd *cobra.Command, env *subsEnv, cfg *config.Config) (
 	[]subs.Match, int, error,
 ) {
 	out := cmd.OutOrStdout()
-	// --dir is normally a Stash-space path (/data/...) so it reads the same as
-	// everything else the tool prints. But subtitles often sit in a staging or
-	// downloads folder outside the library entirely, which no path_map rule
-	// covers — so a path the map cannot translate is taken as already being a
-	// path on the backend. Said out loud, because the alternative is a
-	// confusing error for a perfectly reasonable request.
-	localDir, err := mp.ToLocal(flagSubsDir)
-	if err != nil {
-		localDir = flagSubsDir
-		fmt.Fprintf(out, "no path_map rule covers %s — reading it as a path on %s\n",
-			flagSubsDir, fs.Describe())
-	}
-
+	fs, ix, localDir := env.srcFS, env.ix, env.dir
 	found, problems, err := subs.Collect(ctx, fs, localDir, cfg.Sidecars.Extensions, flagSubsRecursive)
 	if err != nil {
 		return nil, 0, fmt.Errorf("scan %s: %w", localDir, err)
@@ -277,13 +317,13 @@ func runSubsScan(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	out := cmd.OutOrStdout()
 
-	fs, mp, ix, fsCleanup, err := subsSetup(ctx, cmd, cfg, client)
+	env, fsCleanup, err := subsSetup(ctx, cmd, cfg, client)
 	if err != nil {
 		return err
 	}
 	defer fsCleanup()
 
-	matches, attached, err := collectAndMatch(ctx, cmd, fs, mp, ix, cfg)
+	matches, attached, err := collectAndMatch(ctx, cmd, env, cfg)
 	if err != nil {
 		return err
 	}
@@ -321,19 +361,19 @@ func runSubsApply(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	out := cmd.OutOrStdout()
 
-	fs, mp, ix, fsCleanup, err := subsSetup(ctx, cmd, cfg, client)
+	env, fsCleanup, err := subsSetup(ctx, cmd, cfg, client)
 	if err != nil {
 		return err
 	}
 	defer fsCleanup()
 
 	flagSubsCandidates = 3
-	matches, attached, err := collectAndMatch(ctx, cmd, fs, mp, ix, cfg)
+	matches, attached, err := collectAndMatch(ctx, cmd, env, cfg)
 	if err != nil {
 		return err
 	}
 
-	plan := subs.BuildPlacement(matches, mp, flagSubsIncludeLikely)
+	plan := subs.BuildPlacement(matches, env.mp, flagSubsIncludeLikely)
 	mode := "DRY RUN"
 	if flagSubsCommit {
 		mode = "COMMIT"
@@ -365,10 +405,13 @@ func runSubsApply(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	mover, err := sidecar.NewMover(fs, mp, cfg.Sidecars.Extensions)
+	mover, err := sidecar.NewMover(env.libFS, env.mp, cfg.Sidecars.Extensions)
 	if err != nil {
 		return err
 	}
+	// Subtitles may live on a different machine from the library; the mover
+	// streams across the two when they differ.
+	mover = mover.WithSource(env.srcFS)
 	res := mover.Apply(ctx, plan.PlannedMoves())
 	fmt.Fprintf(out, "\nmoved:   %d\n", len(res.Moved))
 	fmt.Fprintf(out, "skipped: %d\n", len(res.Skipped))

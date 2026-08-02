@@ -47,6 +47,15 @@ type FS interface {
 	// Open returns the contents of a file for reading. The caller closes it.
 	Open(ctx context.Context, path string) (io.ReadCloser, error)
 
+	// Create opens path for writing, truncating any existing file. The caller
+	// closes it. Needed to write a file onto a DIFFERENT backend than the one
+	// it was read from.
+	Create(ctx context.Context, path string) (io.WriteCloser, error)
+
+	// Remove deletes a file. Used to drop the source after a cross-backend
+	// move has been completed and verified.
+	Remove(ctx context.Context, path string) error
+
 	// Exists reports whether path exists.
 	Exists(ctx context.Context, path string) (bool, error)
 

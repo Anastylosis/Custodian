@@ -3,6 +3,7 @@ package vfs
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path"
 	"strconv"
@@ -166,5 +167,48 @@ func TestIntegrationSSHListMissingDirIsEmpty(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Errorf("ReadDir(missing) = %v, want empty", entries)
+	}
+}
+
+// The real shape of the feature: a subtitle on this machine, a library on the
+// far end of an SSH connection, moved across in one operation.
+func TestIntegrationSSHMoveFromLocal(t *testing.T) {
+	remote, dir := integrationSSH(t)
+	ctx := context.Background()
+
+	local := NewLocal()
+	tmp := t.TempDir()
+	srcPath := path.Join(tmp, "Some Performer+-+clip (2024)'s & more.en.srt")
+	body := "1\n00:00:01,000 --> 00:00:02,000\nhello\n"
+	if err := os.WriteFile(srcPath, []byte(body), 0o644); err != nil {
+		t.Fatalf("write local source: %v", err)
+	}
+
+	dstPath := path.Join(dir, "2024-01-01_Placed.Clip_1080p.en.srt")
+	if err := Move(ctx, local, remote, srcPath, dstPath); err != nil {
+		t.Fatalf("Move local -> ssh: %v", err)
+	}
+	t.Cleanup(func() { _ = remote.client.Remove(dstPath) })
+
+	if ok, _ := remote.Exists(ctx, dstPath); !ok {
+		t.Fatal("destination missing on the remote")
+	}
+	if ok, _ := local.Exists(ctx, srcPath); ok {
+		t.Error("local source still present after the move")
+	}
+	// Contents must arrive intact, not truncated.
+	rc, err := remote.Open(ctx, dstPath)
+	if err != nil {
+		t.Fatalf("open remote: %v", err)
+	}
+	defer rc.Close()
+	buf := make([]byte, len(body))
+	n, _ := io.ReadFull(rc, buf)
+	if string(buf[:n]) != body {
+		t.Errorf("contents differ after transfer: %q", string(buf[:n]))
+	}
+	// No temporary must survive; Stash would index it as a caption.
+	if ok, _ := remote.Exists(ctx, dstPath+".sj-partial"); ok {
+		t.Error("temporary file left on the remote")
 	}
 }

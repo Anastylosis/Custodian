@@ -46,7 +46,13 @@ type Failure struct {
 // tolerates that by doing nothing. This keeps the call sites in organize free
 // of feature-flag branching.
 type Mover struct {
-	fs   vfs.FS
+	// fs is the library filesystem: where videos live and sidecars must land.
+	fs vfs.FS
+	// src is where the files being moved are read from. It defaults to fs,
+	// which is right for organize — a sidecar always starts beside its video.
+	// `subs` overrides it, because loose subtitles routinely sit on a
+	// different machine from the library.
+	src  vfs.FS
 	mp   *pathmap.Mapper
 	exts []string
 }
@@ -56,7 +62,26 @@ func NewMover(fs vfs.FS, mp *pathmap.Mapper, exts []string) (*Mover, error) {
 	if fs == nil {
 		return nil, errors.New("sidecar: nil filesystem")
 	}
-	return &Mover{fs: fs, mp: mp, exts: exts}, nil
+	return &Mover{fs: fs, src: fs, mp: mp, exts: exts}, nil
+}
+
+// WithSource returns a copy that reads its source files from src instead of
+// from the library filesystem. Moves then stream across the two backends.
+func (mv *Mover) WithSource(src vfs.FS) *Mover {
+	if mv == nil || src == nil {
+		return mv
+	}
+	cp := *mv
+	cp.src = src
+	return &cp
+}
+
+// SourceFS reports where source files are read from.
+func (mv *Mover) SourceFS() vfs.FS {
+	if mv == nil {
+		return nil
+	}
+	return mv.src
 }
 
 // Describe reports the backend in use, for diagnostics.
@@ -141,7 +166,7 @@ func (mv *Mover) Apply(ctx context.Context, moves []PlannedMove) Result {
 			res.Skipped = append(res.Skipped, Skip{Move: m, Reason: "destination already exists"})
 			continue
 		}
-		if err := mv.fs.Rename(ctx, m.SrcLocal, m.DstLocal); err != nil {
+		if err := vfs.Move(ctx, mv.src, mv.fs, m.SrcLocal, m.DstLocal); err != nil {
 			switch {
 			case errors.Is(err, vfs.ErrExist):
 				res.Skipped = append(res.Skipped, Skip{Move: m, Reason: "destination already exists"})

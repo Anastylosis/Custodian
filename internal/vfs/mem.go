@@ -91,6 +91,12 @@ func (m *Mem) Rename(_ context.Context, src, dst string) error {
 	}
 	delete(m.Files, src)
 	m.Files[dst] = true
+	// Contents must follow the file, or the double silently loses data in a
+	// way no real filesystem would.
+	if body, ok := m.Contents[src]; ok {
+		m.Contents[dst] = body
+		delete(m.Contents, src)
+	}
 	m.Renames = append(m.Renames, src+" -> "+dst)
 	return nil
 }
@@ -107,3 +113,26 @@ func (m *Mem) Sorted() []string {
 
 // String renders the file set for test failure messages.
 func (m *Mem) String() string { return strings.Join(m.Sorted(), "\n") }
+
+type memWriter struct {
+	m   *Mem
+	p   string
+	buf strings.Builder
+}
+
+func (w *memWriter) Write(b []byte) (int, error) { return w.buf.Write(b) }
+func (w *memWriter) Close() error {
+	w.m.Files[w.p] = true
+	w.m.Contents[w.p] = w.buf.String()
+	return nil
+}
+
+func (m *Mem) Create(_ context.Context, p string) (io.WriteCloser, error) {
+	return &memWriter{m: m, p: p}, nil
+}
+
+func (m *Mem) Remove(_ context.Context, p string) error {
+	delete(m.Files, p)
+	delete(m.Contents, p)
+	return nil
+}
