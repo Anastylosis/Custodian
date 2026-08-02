@@ -57,6 +57,7 @@ See PLAN.md for the full design.`,
 	root.AddCommand(newFilesCmd())
 	root.AddCommand(newOrphansCmd())
 	root.AddCommand(newOrganizeCmd())
+	root.AddCommand(newSidecarsCmd())
 	root.AddCommand(newStatsCmd())
 	root.AddCommand(newReviewCmd())
 
