@@ -1,5 +1,10 @@
 name: CI
 
+# Actions are pinned to exact versions, not moving major tags. A major tag
+# like @v7 advances whenever v7.x ships, so an unrelated commit can turn CI
+# red — which is exactly how `version: latest` silently moved this repo's
+# linter from v1 to v2. Dependabot proposes bumps; they land deliberately.
+
 on:
   push:
     branches: [main, master]
@@ -18,10 +23,10 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
 
@@ -38,10 +43,10 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
 
@@ -52,7 +57,7 @@ jobs:
         # Pinned rather than `latest`: a new release adding a check turns CI
         # red on an unrelated commit, and `latest` already jumped this repo
         # from v1 to v2 silently. Bump deliberately, alongside .golangci.yml.
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: v2.11.4
           args: --timeout=5m
@@ -64,10 +69,10 @@ jobs:
     name: Vulncheck (informational)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
 
@@ -95,10 +100,10 @@ jobs:
           - goos: windows
             goarch: amd64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
 

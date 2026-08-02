@@ -1,5 +1,10 @@
 name: Release
 
+# Actions are pinned to exact versions, not moving major tags. A major tag
+# like @v7 advances whenever v7.x ships, so an unrelated commit can turn CI
+# red — which is exactly how `version: latest` silently moved this repo's
+# linter from v1 to v2. Dependabot proposes bumps; they land deliberately.
+
 on:
   push:
     tags:
@@ -17,12 +22,12 @@ jobs:
     name: Build and Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
 
@@ -97,7 +102,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v3.0.2
         with:
           files: dist/*
           generate_release_notes: true
