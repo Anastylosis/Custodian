@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -13,12 +17,12 @@ jobs:
     name: Build and Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -65,6 +69,19 @@ jobs:
             cd ..
           done
 
+      - name: Generate SHA256SUMS
+        run: |
+          cd dist
+          # Capture the checksums BEFORE creating the file: the shell opens a
+          # redirect target before expanding the glob, so `* > SHA256SUMS`
+          # would hash an empty SHA256SUMS into its own listing. Sorted so the
+          # file is stable and diffable between releases.
+          sums=$(sha256sum -- *)
+          echo "$sums" | LC_ALL=C sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+          # Every line must verify before it is published.
+          sha256sum --check --strict SHA256SUMS
+
       - name: Generate changelog
         id: changelog
         run: |
@@ -80,7 +97,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
