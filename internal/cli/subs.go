@@ -230,9 +230,17 @@ func collectAndMatch(ctx context.Context, cmd *cobra.Command, fs vfs.FS, mp *pat
 	[]subs.Match, int, error,
 ) {
 	out := cmd.OutOrStdout()
+	// --dir is normally a Stash-space path (/data/...) so it reads the same as
+	// everything else the tool prints. But subtitles often sit in a staging or
+	// downloads folder outside the library entirely, which no path_map rule
+	// covers — so a path the map cannot translate is taken as already being a
+	// path on the backend. Said out loud, because the alternative is a
+	// confusing error for a perfectly reasonable request.
 	localDir, err := mp.ToLocal(flagSubsDir)
 	if err != nil {
-		return nil, 0, err
+		localDir = flagSubsDir
+		fmt.Fprintf(out, "no path_map rule covers %s — reading it as a path on %s\n",
+			flagSubsDir, fs.Describe())
 	}
 
 	found, problems, err := subs.Collect(ctx, fs, localDir, cfg.Sidecars.Extensions, flagSubsRecursive)
