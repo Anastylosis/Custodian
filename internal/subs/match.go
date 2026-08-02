@@ -36,12 +36,23 @@ type SceneRef struct {
 	// this subtitle's language; used to avoid proposing a duplicate.
 	HasCaption bool
 
-	// tokens is every meaningful word; content and creator are that set split
-	// by the library's creator vocabulary.
+	// tokens is every meaningful word from filename, title, studio and cast.
+	// It drives candidate lookup; creator holds the handles split out of it.
 	tokens  map[string]bool
-	content map[string]bool
 	creator map[string]bool
 	codes   map[string]bool
+
+	// titleContent and stemContent are scored SEPARATELY rather than merged.
+	//
+	// Libraries carry the identifying information in one place or the other,
+	// not both: in a measured 61k-scene library 52% of scenes had no title at
+	// all and relied entirely on a structured filename, while a Stash-Box
+	// tagged library is the reverse — good titles beside filenames like
+	// "1080p.wmv". Merging them means a junk filename dilutes a good title and
+	// a long filename drags similarity down through sheer token count. Taking
+	// the better of the two lets each convention work on its own terms.
+	titleContent map[string]bool
+	stemContent  map[string]bool
 }
 
 // Subtitle is one loose subtitle file to place.
@@ -64,6 +75,10 @@ type Candidate struct {
 	Score float64
 	// Delta is sceneDuration - subtitleRuntime.
 	Delta time.Duration
+	// NameSim is the best of the title/filename similarity, kept so the
+	// verdict can require real name agreement rather than trusting a score
+	// that runtime alone could have inflated.
+	NameSim float64
 	// Reasons explains the score in human terms, for the report.
 	Reasons []string
 }
@@ -113,7 +128,9 @@ func NewIndex(scenes []SceneRef, vocab *Vocab) *Index {
 		s := &idx.scenes[i]
 		blob := strings.Join(append([]string{s.Stem, s.Title, s.Studio}, s.Performers...), " ")
 		s.tokens = Tokens(blob)
-		s.content, s.creator = vocab.Split(s.tokens)
+		_, s.creator = vocab.Split(s.tokens)
+		s.titleContent, _ = vocab.Split(Tokens(s.Title))
+		s.stemContent, _ = vocab.Split(Tokens(s.Stem))
 		s.codes = Codes(blob)
 		for c := range s.codes {
 			idx.byCode[c] = append(idx.byCode[c], i)
@@ -182,17 +199,27 @@ func (ix *Index) Match(sub Subtitle, maxCandidates int) Match {
 			continue
 		}
 		sc := &ix.scenes[i]
-		// Title similarity deliberately ignores creator words. Two clips by
-		// one creator share those regardless of content, so counting them
-		// here would make every clip by that creator look alike.
-		sim := F1(subContent, sc.content)
+		// Similarity deliberately ignores creator words. Two clips by one
+		// creator share those regardless of content, so counting them here
+		// would make every clip by that creator look alike.
+		//
+		// The scene's title and its filename are compared independently and
+		// the better one wins, so a library that titles its scenes and one
+		// that encodes everything in filenames both match well.
+		titleSim := F1(subContent, sc.titleContent)
+		stemSim := F1(subContent, sc.stemContent)
+		sim, via := titleSim, "title"
+		if stemSim > sim {
+			sim, via = stemSim, "filename"
+		}
 		if sim < 0.2 && !hasCandidate(scores, i) {
 			continue
 		}
 		c := get(i)
 		c.Score += 70 * sim
+		c.NameSim = sim
 		if sim > 0 {
-			c.Reasons = append(c.Reasons, "title "+pct(sim))
+			c.Reasons = append(c.Reasons, via+" "+pct(sim))
 		}
 		// Creator agreement is real but weak evidence: it narrows the field
 		// without ever deciding on its own.
@@ -271,14 +298,24 @@ func decide(sub Subtitle, ranked []Candidate) Verdict {
 	runtimeAgrees := runtimeKnown && top.Delta >= -20*time.Second && top.Delta <= 60*time.Second
 	runtimeContradicts := runtimeKnown && !runtimeAgrees
 
+	// Runtime alone is not identification. In a library of 61k scenes, plenty
+	// of unrelated videos share any given length, so a weak name plus a lucky
+	// duration must not confirm: measured over 1,432 real subtitles this
+	// produced a tail of confident-looking nonsense, e.g. "Lacy stuffing"
+	// matched to "Rubbing and Stuffing my Pussy" at 29% name similarity.
+	// A code or an exact filename is identification on its own; otherwise the
+	// name has to genuinely agree.
+	hardID := hasReason(top, "code") || hasReason(top, "filename match")
+	nameAgrees := top.NameSim >= 0.5
+
 	switch {
 	case runtimeContradicts && !hasReason(top, "filename match"):
 		return Ambiguous
 	case hasReason(top, "filename match") && !runtimeContradicts:
 		return Confirmed
-	case top.Score >= 90 && gap >= 20:
+	case top.Score >= 90 && gap >= 20 && (hardID || nameAgrees):
 		return Confirmed
-	case runtimeAgrees && top.Score >= 60 && gap >= 15:
+	case runtimeAgrees && top.Score >= 60 && gap >= 15 && (hardID || nameAgrees):
 		return Confirmed
 	case top.Score >= 45 && gap >= 15:
 		return Likely

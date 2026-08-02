@@ -269,3 +269,63 @@ func TestRuntimeFit(t *testing.T) {
 		})
 	}
 }
+
+// Libraries put the identifying information in different places. These two
+// tests pin both conventions, because scoring a merged blob served neither:
+// a junk filename diluted a good title, and a long filename dragged similarity
+// down through sheer token count.
+
+// Convention A: Stash-Box tagged. Good title, meaningless filename.
+func TestMatch_TitleOnlyLibrary(t *testing.T) {
+	ix := NewIndex([]SceneRef{
+		{ID: "1", Stem: "13gvg00367hhb", Title: "The Reluctant Pet Sitter",
+			Path: "/data/x/13gvg00367hhb.mp4", Duration: mins(11, 40)},
+		{ID: "2", Stem: "1080p", Title: "Something Else Entirely",
+			Path: "/data/x/1080p.wmv", Duration: mins(11, 38)},
+	}, testVocab())
+
+	m := ix.Match(Subtitle{Stem: "The Reluctant Pet Sitter", Runtime: mins(11, 38)}, 5)
+	best := m.Best()
+	if best == nil || best.Scene.ID != "1" {
+		t.Fatalf("best = %+v, want scene 1 matched on its title", best)
+	}
+	if m.Verdict != Confirmed {
+		t.Errorf("verdict = %s, want CONFIRMED (reasons %v)", m.Verdict, best.Reasons)
+	}
+}
+
+// Convention B: no titles at all, everything encoded in the filename.
+func TestMatch_FilenameOnlyLibrary(t *testing.T) {
+	ix := NewIndex([]SceneRef{
+		{ID: "1", Stem: "2023-05-23_Some.Performer-The.Reluctant.Pet.Sitter_1080p", Title: "",
+			Path: "/data/x/a.mp4", Duration: mins(11, 40)},
+		{ID: "2", Stem: "2023-05-23_Some.Performer-Something.Else.Entirely_1080p", Title: "",
+			Path: "/data/x/b.mp4", Duration: mins(11, 38)},
+	}, testVocab())
+
+	m := ix.Match(Subtitle{Stem: "The Reluctant Pet Sitter", Runtime: mins(11, 38)}, 5)
+	best := m.Best()
+	if best == nil || best.Scene.ID != "1" {
+		t.Fatalf("best = %+v, want scene 1 matched on its filename", best)
+	}
+}
+
+// A junk filename must not drag down a scene whose title matches well.
+func TestMatch_JunkFilenameDoesNotDiluteGoodTitle(t *testing.T) {
+	ix := NewIndex([]SceneRef{
+		{ID: "1", Stem: "video_2023_final_v2_reencoded_x265_aac_2ch",
+			Title: "Look into My Eyes", Path: "/data/x/a.mp4", Duration: mins(11, 50)},
+	}, testVocab())
+
+	m := ix.Match(Subtitle{Stem: "Look into My Eyes", Runtime: mins(11, 49)}, 5)
+	best := m.Best()
+	if best == nil {
+		t.Fatal("no candidate found")
+	}
+	// Scored on the title, the match is near-perfect; merged with that
+	// filename it would be badly diluted.
+	if best.Score < 90 {
+		t.Errorf("score %.0f is too low; the title should carry it (reasons %v)",
+			best.Score, best.Reasons)
+	}
+}
