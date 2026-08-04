@@ -3,9 +3,9 @@ package cli
 import (
 	"fmt"
 
-	"github.com/Anastylosis/StashJanitor/internal/decide"
-	"github.com/Anastylosis/StashJanitor/internal/store"
-	"github.com/Anastylosis/StashJanitor/internal/tui"
+	"github.com/Anastylosis/Custodian/internal/decide"
+	"github.com/Anastylosis/Custodian/internal/store"
+	"github.com/Anastylosis/Custodian/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
@@ -27,8 +27,8 @@ explanations, and take actions:
   Enter = drill into detail view
   Esc = back to list
 
-Decisions are saved to stash-janitor.sqlite and take effect on the next
-'stash-janitor scenes scan'.`,
+Decisions are saved to custodian.sqlite and take effect on the next
+'custodian scenes scan'.`,
 		RunE: runReview,
 	}
 	cmd.Flags().StringVar(&flagReviewFilter, "filter", "",

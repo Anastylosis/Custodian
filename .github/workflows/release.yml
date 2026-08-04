@@ -53,15 +53,15 @@ jobs:
           for platform in "${platforms[@]}"; do
             GOOS="${platform%/*}"
             GOARCH="${platform#*/}"
-            binary="stash-janitor"
-            archive="stash-janitor-${VERSION}-${GOOS}-${GOARCH}"
+            binary="custodian"
+            archive="custodian-${VERSION}-${GOOS}-${GOARCH}"
 
             if [ "$GOOS" = "windows" ]; then
-              binary="stash-janitor.exe"
+              binary="custodian.exe"
             fi
 
             echo "Building ${GOOS}/${GOARCH}..."
-            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "$LDFLAGS" -o "dist/${binary}" ./cmd/stash-janitor
+            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "$LDFLAGS" -o "dist/${binary}" ./cmd/custodian
 
             # Package as tar.gz (or zip for Windows)
             cd dist
@@ -117,17 +117,17 @@ jobs:
 
             ```sh
             # Linux (amd64)
-            tar xzf stash-janitor-${{ github.ref_name }}-linux-amd64.tar.gz
-            chmod +x stash-janitor
-            ./stash-janitor config init
+            tar xzf custodian-${{ github.ref_name }}-linux-amd64.tar.gz
+            chmod +x custodian
+            ./custodian config init
 
             # macOS (Apple Silicon)
-            tar xzf stash-janitor-${{ github.ref_name }}-darwin-arm64.tar.gz
-            chmod +x stash-janitor
-            ./stash-janitor config init
+            tar xzf custodian-${{ github.ref_name }}-darwin-arm64.tar.gz
+            chmod +x custodian
+            ./custodian config init
             ```
 
             Or build from source:
             ```sh
-            go install github.com/Anastylosis/StashJanitor/cmd/stash-janitor@${{ github.ref_name }}
+            go install github.com/Anastylosis/Custodian/cmd/custodian@${{ github.ref_name }}
             ```

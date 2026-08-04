@@ -7,12 +7,12 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
-// FilesPlan is the precomputed work for `stash-janitor files apply`.
+// FilesPlan is the precomputed work for `custodian files apply`.
 //
 // In Phase 1 this is purely for display: workflow B is report-only by
 // default. Phase 1.5 will add an Execute method that calls
@@ -77,11 +77,11 @@ func PrintFilesPlan(w io.Writer, p *FilesPlan, commit bool) error {
 	if commit {
 		mode = "COMMIT"
 	}
-	fmt.Fprintf(w, "=== stash-janitor files apply (%s) ===\n", mode)
+	fmt.Fprintf(w, "=== custodian files apply (%s) ===\n", mode)
 	fmt.Fprintf(w, "Multi-file scenes in scope:  %d\n", len(p.Actions))
 	fmt.Fprintf(w, "Reclaimable on commit:       %s\n", confirm.HumanBytes(p.TotalReclaimable))
 	if len(p.Actions) == 0 {
-		fmt.Fprintln(w, "\nNothing to do. Try `stash-janitor files scan` first.")
+		fmt.Fprintln(w, "\nNothing to do. Try `custodian files scan` first.")
 		return nil
 	}
 

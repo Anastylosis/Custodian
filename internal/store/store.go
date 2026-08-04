@@ -1,7 +1,7 @@
-// Package store is the SQLite persistence layer for stash-janitor.
+// Package store is the SQLite persistence layer for custodian.
 //
 // All scan results, scoring decisions, and user overrides live in a single
-// SQLite file (default ./stash-janitor.sqlite). Using SQLite means re-runs are fast,
+// SQLite file (default ./custodian.sqlite). Using SQLite means re-runs are fast,
 // reports work offline, and a crash mid-apply doesn't lose your decisions.
 //
 // We use modernc.org/sqlite — a pure-Go SQLite driver — so the binary stays

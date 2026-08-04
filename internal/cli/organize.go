@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/organize"
-	"github.com/Anastylosis/StashJanitor/internal/sidecar"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/organize"
+	"github.com/Anastylosis/Custodian/internal/sidecar"
 	"github.com/spf13/cobra"
 )
 
@@ -34,13 +34,13 @@ other workflow: dry-run default, --commit required, interactive YES
 prompt on commit.
 
 Sidecar files (subtitles, and anything else sharing a video's stem) are
-moved by stash-janitor itself, because Stash does not index them as files
+moved by custodian itself, because Stash does not index them as files
 and moveFiles cannot carry them. That is the one place this tool touches
 the filesystem, and it needs sidecars.path_map configured so it can find
-the library. Run "stash-janitor sidecars check" to verify. Sidecars never
+the library. Run "custodian sidecars check" to verify. Sidecars never
 overwrite an existing file; conflicts are reported and left alone.
 
-Recommended: run stash-janitor scenes apply (dedup) and stash-janitor orphans scan
+Recommended: run custodian scenes apply (dedup) and custodian orphans scan
 (metadata recovery) BEFORE organize, so more files have the metadata
 needed to compute their ideal path.`,
 	}
@@ -98,9 +98,9 @@ func runOrganizeScan(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "  conflicts:         %d\n", res.Conflicts)
 	if res.MultiFileWarning > 0 {
 		fmt.Fprintf(out, "\n  ⚠ %d scenes have multiple files — only the primary file is moved.\n", res.MultiFileWarning)
-		fmt.Fprintf(out, "    Run `stash-janitor files apply --commit` first to clean up multi-file scenes.\n")
+		fmt.Fprintf(out, "    Run `custodian files apply --commit` first to clean up multi-file scenes.\n")
 	}
-	fmt.Fprintln(out, "\nNext: `stash-janitor organize report` to see proposed moves.")
+	fmt.Fprintln(out, "\nNext: `custodian organize report` to see proposed moves.")
 	return nil
 }
 
@@ -150,7 +150,7 @@ func runOrganizeApply(cmd *cobra.Command, args []string) error {
 	// site tolerates that.
 	mover, moverCleanup, err := sidecar.Build(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("%w\n\nRun `stash-janitor sidecars check` to diagnose, or set sidecars.enabled: false", err)
+		return fmt.Errorf("%w\n\nRun `custodian sidecars check` to diagnose, or set sidecars.enabled: false", err)
 	}
 	defer moverCleanup()
 

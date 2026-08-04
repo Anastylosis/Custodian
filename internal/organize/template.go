@@ -9,8 +9,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/stash"
 )
 
 // maxPathLen is the maximum total path length we'll produce. Paths longer

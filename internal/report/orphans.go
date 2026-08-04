@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
 // OrphansStatus is the workflow C summary of orphan-lookup state.
@@ -62,10 +62,10 @@ func ComputeOrphansStatus(ctx context.Context, st *store.Store) (*OrphansStatus,
 func PrintOrphansStatus(w io.Writer, s *OrphansStatus) error {
 	var b strings.Builder
 	if s.LastScanRunID == 0 {
-		_, err := io.WriteString(w, "No orphans scan has been run yet. Try `stash-janitor orphans scan`.\n")
+		_, err := io.WriteString(w, "No orphans scan has been run yet. Try `custodian orphans scan`.\n")
 		return err
 	}
-	b.WriteString("=== stash-janitor orphans status ===\n")
+	b.WriteString("=== custodian orphans status ===\n")
 	fmt.Fprintf(&b, "Last scan run:    #%d\n", s.LastScanRunID)
 	if s.LastScanStarted != nil {
 		fmt.Fprintf(&b, "  Started:        %s\n", s.LastScanStarted.Local().Format(time.RFC3339))

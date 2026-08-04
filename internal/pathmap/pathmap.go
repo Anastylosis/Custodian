@@ -1,5 +1,5 @@
 // Package pathmap translates the paths Stash reports into paths the machine
-// running stash-janitor can actually open.
+// running custodian can actually open.
 //
 // Stash always reports POSIX paths as seen from inside its own process — in a
 // Docker deployment that is typically /data/..., which usually exists nowhere
@@ -60,7 +60,7 @@ func trimTrailingSep(p string) string {
 }
 
 // New builds a Mapper. An empty rule set is valid and yields an identity
-// mapper — the correct configuration when stash-janitor runs on the same
+// mapper — the correct configuration when custodian runs on the same
 // filesystem Stash sees.
 func New(rules []Rule) (*Mapper, error) {
 	cleaned := make([]Rule, 0, len(rules))

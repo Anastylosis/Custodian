@@ -14,12 +14,12 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/Anastylosis/StashJanitor/internal/decide"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/decide"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
-// ScenesOptions configures one invocation of `stash-janitor scenes scan`.
+// ScenesOptions configures one invocation of `custodian scenes scan`.
 type ScenesOptions struct {
 	Distance     int
 	DurationDiff float64

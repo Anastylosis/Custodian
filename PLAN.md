@@ -3,6 +3,16 @@
 Status: **draft, awaiting user sign-off**
 Author: collaborative planning session, 2026-04-09
 
+> **2026-08-04 — Renamed to Custodian.** The project moved from the Wasylq
+> account to the Anastylosis org and was renamed StashJanitor → Custodian,
+> reflecting that it's expected to grow beyond Stash (COVE support is an
+> aspiration, not yet implemented — today this still only talks to Stash).
+> The GitHub repo itself will be transferred to Anastylosis and then renamed
+> to Custodian in the web UI; GitHub chains the redirects from the old
+> Wasylq/StashJanitor URL through to the final one. The rest of this
+> document is left as the historical record and still says StashJanitor
+> throughout.
+
 ## 1. Goal
 
 A single static Go binary that finds duplicate video scenes in your Stash

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
 // FilesStatus is the workflow B equivalent of ScenesStatus.
@@ -27,7 +27,7 @@ type FilesStatus struct {
 	Dismissed   int `json:"dismissed"`
 
 	// ReclaimableBytes is the sum of loser file sizes across decided
-	// groups — what would be freed if you ran `stash-janitor files apply --commit`
+	// groups — what would be freed if you ran `custodian files apply --commit`
 	// (Phase 1.5). Files in a multi-file scene are byte-equivalent, so
 	// this number is reliable.
 	ReclaimableBytes int64 `json:"reclaimable_bytes"`
@@ -84,11 +84,11 @@ func PrintFilesStatus(w io.Writer, s *FilesStatus) error {
 	var b strings.Builder
 
 	if s.LastScanRunID == 0 {
-		_, err := io.WriteString(w, "No files scan has been run yet. Try `stash-janitor files scan`.\n")
+		_, err := io.WriteString(w, "No files scan has been run yet. Try `custodian files scan`.\n")
 		return err
 	}
 
-	b.WriteString("=== stash-janitor files status ===\n")
+	b.WriteString("=== custodian files status ===\n")
 	fmt.Fprintf(&b, "Last scan run:    #%d\n", s.LastScanRunID)
 	if s.LastScanStarted != nil {
 		fmt.Fprintf(&b, "  Started:        %s\n", s.LastScanStarted.Local().Format(time.RFC3339))

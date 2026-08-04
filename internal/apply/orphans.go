@@ -7,12 +7,12 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
-// OrphansPlan is the precomputed work for `stash-janitor orphans apply`.
+// OrphansPlan is the precomputed work for `custodian orphans apply`.
 //
 // We only act on rows whose status is "matched" — no_match rows are
 // nothing to do, and applied rows are already handled. Each row in
@@ -44,22 +44,22 @@ func PrintOrphansPlan(w io.Writer, p *OrphansPlan, commit bool, writeStashID boo
 	if commit {
 		mode = "COMMIT"
 	}
-	fmt.Fprintf(w, "=== stash-janitor orphans apply (%s) ===\n", mode)
+	fmt.Fprintf(w, "=== custodian orphans apply (%s) ===\n", mode)
 	fmt.Fprintf(w, "Matched orphans:  %d\n", len(p.Lookups))
 	if len(p.Lookups) == 0 {
-		fmt.Fprintln(w, "\nNothing to do. Try `stash-janitor orphans scan` first.")
+		fmt.Fprintln(w, "\nNothing to do. Try `custodian orphans scan` first.")
 		return nil
 	}
 	if !writeStashID {
 		fmt.Fprintln(w, "\norphans.write_stash_id_on_apply is false (default).")
-		fmt.Fprintln(w, "stash-janitor will NOT write anything to Stash. To handle matches:")
-		fmt.Fprintln(w, "  1. Run `stash-janitor orphans report --filter matched` to see what was found")
+		fmt.Fprintln(w, "custodian will NOT write anything to Stash. To handle matches:")
+		fmt.Fprintln(w, "  1. Run `custodian orphans report --filter matched` to see what was found")
 		fmt.Fprintln(w, "  2. In Stash UI, use the Scene Tagger to link and pull metadata")
 		fmt.Fprintln(w, "\n--commit will mark these as reviewed in the local cache so future")
 		fmt.Fprintln(w, "scans skip them. No Stash mutations.")
 		fmt.Fprintln(w, "\nTo enable auto-linking, set orphans.write_stash_id_on_apply: true in config.")
 	} else {
-		fmt.Fprintln(w, "\nFor each matched orphan, stash-janitor will write the stash_id link via sceneUpdate.")
+		fmt.Fprintln(w, "\nFor each matched orphan, custodian will write the stash_id link via sceneUpdate.")
 		fmt.Fprintln(w, "Then run Stash's Scene Tagger to pull full metadata (performers, studio, tags).")
 	}
 	if !commit {

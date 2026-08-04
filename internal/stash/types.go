@@ -1,6 +1,6 @@
 package stash
 
-// Types in this file mirror the subset of Stash's GraphQL schema that stash-janitor
+// Types in this file mirror the subset of Stash's GraphQL schema that custodian
 // actually consumes. They are intentionally NOT a complete schema clone —
 // adding a new field is cheap and explicit, but carrying the entire surface
 // area would couple us to schema churn we don't care about.
@@ -8,7 +8,7 @@ package stash
 // JSON tags match Stash's field names (snake_case). Field names are Go
 // idiomatic (CamelCase).
 
-// Scene is a Stash scene with the fields stash-janitor needs across both workflows.
+// Scene is a Stash scene with the fields custodian needs across both workflows.
 type Scene struct {
 	ID        string   `json:"id"`
 	Title     string   `json:"title"`
@@ -73,7 +73,7 @@ type Fingerprint struct {
 	Value string `json:"value"`
 }
 
-// Tag is a Stash tag (id+name only — stash-janitor doesn't need anything else).
+// Tag is a Stash tag (id+name only — custodian doesn't need anything else).
 type Tag struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`

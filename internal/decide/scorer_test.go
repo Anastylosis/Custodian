@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
 // defaultScorer builds a SceneScorer from the embedded default config —

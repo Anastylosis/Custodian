@@ -1,4 +1,4 @@
-// Package cli wires up the cobra command tree and global flags for stash-janitor.
+// Package cli wires up the cobra command tree and global flags for custodian.
 package cli
 
 import (
@@ -20,10 +20,10 @@ var (
 // version/commit/date are injected by main via ldflags at build time.
 func NewRootCmd(version, commit, date string) *cobra.Command {
 	root := &cobra.Command{
-		Use:     "stash-janitor",
-		Short:   "StashJanitor — find and resolve duplicate scenes in a Stash library",
+		Use:     "custodian",
+		Short:   "Custodian — find and resolve duplicate scenes in a Stash library",
 		Version: version,
-		Long: `stash-janitor is a CLI for safely deduplicating videos managed by Stash (stashapp/stash).
+		Long: `custodian is a CLI for safely deduplicating videos managed by Stash (stashapp/stash).
 
 It addresses two distinct problems:
   - Workflow A: cross-scene duplicates (separate Stash scenes with the same content)
@@ -31,8 +31,8 @@ It addresses two distinct problems:
 
 All destructive actions go through Stash's GraphQL API. The one exception is
 sidecar files (subtitles): Stash does not index them as files, so its moveFiles
-mutation cannot move them, and stash-janitor relocates those itself. See
-"stash-janitor sidecars check".
+mutation cannot move them, and custodian relocates those itself. See
+"custodian sidecars check".
 
 The default action is always the safest one: dry-run for apply commands,
 tag-only for cross-scene duplicates, report-only for within-scene files.
@@ -46,10 +46,10 @@ See PLAN.md for the full design.`,
 	}
 
 	// Custom version template showing commit and date alongside the version tag.
-	root.SetVersionTemplate(fmt.Sprintf("StashJanitor %s (commit: %s, built: %s)\n", version, commit, date))
+	root.SetVersionTemplate(fmt.Sprintf("Custodian %s (commit: %s, built: %s)\n", version, commit, date))
 
-	root.PersistentFlags().StringVar(&flagConfigPath, "config", "", "path to config file (default: ~/.config/stash-janitor/config.yaml or ./config.yaml)")
-	root.PersistentFlags().StringVar(&flagDBPath, "db", "", "path to local sqlite cache (default: ~/.local/share/stash-janitor/ or ./stash-janitor.sqlite)")
+	root.PersistentFlags().StringVar(&flagConfigPath, "config", "", "path to config file (default: ~/.config/custodian/config.yaml or ./config.yaml)")
+	root.PersistentFlags().StringVar(&flagDBPath, "db", "", "path to local sqlite cache (default: ~/.local/share/custodian/ or ./custodian.sqlite)")
 	root.PersistentFlags().CountVarP(&flagVerbose, "verbose", "v", "increase log verbosity (-v info, -vv debug)")
 
 	root.AddCommand(newConfigCmd())

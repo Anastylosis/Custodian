@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
 // FileScorer ranks files within a single Stash scene (workflow B). Files

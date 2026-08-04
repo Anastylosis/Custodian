@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/decide"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/decide"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
 func newFileScorer(t *testing.T) *decide.FileScorer {

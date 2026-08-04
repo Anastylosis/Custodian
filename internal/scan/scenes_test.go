@@ -6,16 +6,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/decide"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/decide"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := store.Open(filepath.Join(dir, "stash-janitor.sqlite"))
+	s, err := store.Open(filepath.Join(dir, "custodian.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}

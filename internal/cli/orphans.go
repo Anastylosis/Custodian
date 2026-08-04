@@ -6,10 +6,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/Anastylosis/StashJanitor/internal/apply"
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/report"
-	"github.com/Anastylosis/StashJanitor/internal/scan"
+	"github.com/Anastylosis/Custodian/internal/apply"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/report"
+	"github.com/Anastylosis/Custodian/internal/scan"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +31,7 @@ var (
 	flagOrphansApplyYes    bool
 )
 
-// newOrphansCmd builds the `stash-janitor orphans` subcommand tree (workflow C).
+// newOrphansCmd builds the `custodian orphans` subcommand tree (workflow C).
 //
 // Workflow C finds scenes with no stash_ids ("orphans"), queries stash-box
 // via Stash's scrapeMultiScenes for matches by phash, and lets you write
@@ -43,7 +43,7 @@ func newOrphansCmd() *cobra.Command {
 		Long: `Workflow C tackles the 'lots of scenes with no metadata' problem.
 
 A scene is an "orphan" when it has no stash_ids attached — Stash hasn't
-matched it to any stash-box entry. stash-janitor enumerates orphans, asks Stash to
+matched it to any stash-box entry. custodian enumerates orphans, asks Stash to
 query a stash-box endpoint by phash for each, and stores the results
 locally so you can review and apply them in your own time.
 
@@ -134,7 +134,7 @@ func runOrphansScan(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "  matched:         %d\n", res.Matched)
 	fmt.Fprintf(out, "  no_match:        %d\n", res.NoMatch)
 	fmt.Fprintf(out, "  skipped (cache): %d\n", res.Skipped)
-	fmt.Fprintln(out, "\nNext: `stash-janitor orphans report --filter matched` to see what stash-box found.")
+	fmt.Fprintln(out, "\nNext: `custodian orphans report --filter matched` to see what stash-box found.")
 	return nil
 }
 

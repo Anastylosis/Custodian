@@ -160,7 +160,7 @@ func TestStashAPIKey(t *testing.T) {
 	}
 }
 
-// TestWriteDefaultRefusesOverwrite makes sure `stash-janitor config init` cannot
+// TestWriteDefaultRefusesOverwrite makes sure `custodian config init` cannot
 // silently clobber an existing config.
 func TestWriteDefaultRefusesOverwrite(t *testing.T) {
 	dir := t.TempDir()

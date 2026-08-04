@@ -151,7 +151,7 @@ func (c *Client) FindMultiFileScenesPage(ctx context.Context, page, perPage int)
 }
 
 // ============================================================================
-// Tag find-or-create — used by `stash-janitor scenes apply --action tag`
+// Tag find-or-create — used by `custodian scenes apply --action tag`
 // ============================================================================
 
 const findTagByNameQuery = `
@@ -374,7 +374,7 @@ mutation ScenesDestroy($ids: [ID!]!) {
 `
 
 // ScenesDestroy hard-deletes the given scenes from Stash AND deletes their
-// underlying files from disk. Used by `stash-janitor scenes apply --action delete`
+// underlying files from disk. Used by `custodian scenes apply --action delete`
 // for the case where the user is certain there's nothing worth preserving
 // on the losers.
 //
@@ -457,7 +457,7 @@ query FindAllScenes($page: Int!, $per_page: Int!) {
 `
 
 // FindAllScenesPage returns one page of ALL scenes (no filter). Used by
-// `stash-janitor organize scan` which needs to see every scene in the library to
+// `custodian organize scan` which needs to see every scene in the library to
 // compute ideal paths.
 func (c *Client) FindAllScenesPage(ctx context.Context, page, perPage int) (*FindScenesResult, error) {
 	if page < 1 {
@@ -493,7 +493,7 @@ query FindOrphanScenes($page: Int!, $per_page: Int!) {
 `
 
 // FindOrphanScenesPage returns one page of scenes that have no stash_ids
-// attached. Used by `stash-janitor orphans scan` to enumerate orphans before
+// attached. Used by `custodian orphans scan` to enumerate orphans before
 // querying stash-box.
 func (c *Client) FindOrphanScenesPage(ctx context.Context, page, perPage int) (*FindScenesResult, error) {
 	if page < 1 {
@@ -565,7 +565,7 @@ mutation SetSceneStashIDs($id: ID!, $stash_ids: [StashIDInput!]!) {
 `
 
 // SetSceneStashIDs replaces a scene's stash_ids list. Used by
-// `stash-janitor orphans apply` to write a stash-box match back to Stash.
+// `custodian orphans apply` to write a stash-box match back to Stash.
 //
 // Note: this REPLACES the list. If the scene already has stash_ids for
 // other endpoints, the caller is responsible for unioning them in.
@@ -632,7 +632,7 @@ type LibraryStats struct {
 	WithMetadata   int     `json:"with_metadata"` // scenes that have at least one stash_id
 }
 
-// LibraryStats fetches aggregate counts from Stash. Used by `stash-janitor stats`.
+// LibraryStats fetches aggregate counts from Stash. Used by `custodian stats`.
 func (c *Client) LibraryStats(ctx context.Context) (*LibraryStats, error) {
 	var resp struct {
 		Stats struct {
@@ -666,7 +666,7 @@ const configurationStashBoxesQuery = `
 `
 
 // StashBoxes returns the list of stash-box endpoints currently configured
-// in Stash's general settings. Used by `stash-janitor orphans scan` to discover
+// in Stash's general settings. Used by `custodian orphans scan` to discover
 // which endpoint(s) to query when the user hasn't passed --endpoint.
 func (c *Client) StashBoxes(ctx context.Context) ([]StashBoxConfig, error) {
 	var resp struct {
@@ -683,7 +683,7 @@ func (c *Client) StashBoxes(ctx context.Context) ([]StashBoxConfig, error) {
 }
 
 // Version returns Stash's version info. Used for connectivity smoke tests
-// and to record the schema version stash-janitor was talking to in scan_runs.
+// and to record the schema version custodian was talking to in scan_runs.
 func (c *Client) Version(ctx context.Context) (string, string, error) {
 	var resp struct {
 		Version struct {

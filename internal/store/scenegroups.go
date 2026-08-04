@@ -161,7 +161,7 @@ func (s *Store) ListSceneGroups(ctx context.Context, statuses []string) ([]*Scen
 }
 
 // GetSceneGroupByID returns a scene group by its primary key (the #N
-// shown in the report). Used by `stash-janitor scenes mark --group N` so the user
+// shown in the report). Used by `custodian scenes mark --group N` so the user
 // doesn't have to copy the full signature.
 func (s *Store) GetSceneGroupByID(ctx context.Context, id int64) (*SceneGroup, error) {
 	row := s.db.QueryRowContext(ctx,

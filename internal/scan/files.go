@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/Anastylosis/StashJanitor/internal/decide"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/decide"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
-// FilesOptions configures one invocation of `stash-janitor files scan`.
+// FilesOptions configures one invocation of `custodian files scan`.
 type FilesOptions struct {
 	// PerPage is the page size used when paginating findScenes.
 	// Defaults to 100 if zero.

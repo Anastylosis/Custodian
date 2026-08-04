@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Anastylosis/StashJanitor/internal/pathmap"
-	"github.com/Anastylosis/StashJanitor/internal/vfs"
+	"github.com/Anastylosis/Custodian/internal/pathmap"
+	"github.com/Anastylosis/Custodian/internal/vfs"
 )
 
 func newTestMover(t *testing.T, fs vfs.FS, rules []pathmap.Rule) *Mover {

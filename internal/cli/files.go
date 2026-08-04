@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Anastylosis/StashJanitor/internal/apply"
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/decide"
-	"github.com/Anastylosis/StashJanitor/internal/report"
-	"github.com/Anastylosis/StashJanitor/internal/scan"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/apply"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/decide"
+	"github.com/Anastylosis/Custodian/internal/report"
+	"github.com/Anastylosis/Custodian/internal/scan"
+	"github.com/Anastylosis/Custodian/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -32,7 +32,7 @@ var (
 	flagFilesMarkNotes   string
 )
 
-// newFilesCmd builds the `stash-janitor files` subcommand tree (workflow B).
+// newFilesCmd builds the `custodian files` subcommand tree (workflow B).
 //
 // Workflow B handles single Stash scenes that have multiple files attached.
 // Stash only attaches files to a scene by oshash/md5 match (verified in
@@ -97,14 +97,14 @@ lands in Phase 1.5.`,
 		Use:   "mark",
 		Short: "Persist a manual override for a multi-file scene",
 		Long: `Persist a decision about a multi-file scene that survives across scan
-re-runs. Stored locally in stash-janitor.sqlite, keyed by the scene ID.
+re-runs. Stored locally in custodian.sqlite, keyed by the scene ID.
 
 Decisions:
   keep_all   Don't ever propose pruning this scene's files. Future scans
              mark it dismissed and skip it during apply.
   dismiss    Same effect as keep_all but with a different label.
 
-Use 'stash-janitor files report' to find the scene ID you want to mark.`,
+Use 'custodian files report' to find the scene ID you want to mark.`,
 		RunE: runFilesMark,
 	}
 	markCmd.Flags().StringVar(&flagFilesMarkSceneID, "scene-id", "", "Stash scene ID")
@@ -142,7 +142,7 @@ func runFilesScan(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "  decided:          %d\n", res.Decided)
 	fmt.Fprintf(out, "  needs_review:     %d\n", res.NeedsReview)
 	fmt.Fprintf(out, "  dismissed:        %d\n", res.Dismissed)
-	fmt.Fprintln(out, "\nNext: `stash-janitor files status` for reclaimable bytes, `stash-janitor files report` for per-scene detail.")
+	fmt.Fprintln(out, "\nNext: `custodian files status` for reclaimable bytes, `custodian files report` for per-scene detail.")
 	return nil
 }
 
@@ -252,7 +252,7 @@ func runFilesApply(cmd *cobra.Command, args []string) error {
 
 func runFilesMark(cmd *cobra.Command, args []string) error {
 	if flagFilesMarkSceneID == "" {
-		return fmt.Errorf("--scene-id is required (run `stash-janitor files report` to find one)")
+		return fmt.Errorf("--scene-id is required (run `custodian files report` to find one)")
 	}
 	switch flagFilesMarkAs {
 	case "keep_all", "dismiss":
@@ -278,7 +278,7 @@ func runFilesMark(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(),
-		"recorded: scene=%s decision=%s\nThis override applies to future `stash-janitor files scan` runs.\n",
+		"recorded: scene=%s decision=%s\nThis override applies to future `custodian files scan` runs.\n",
 		flagFilesMarkSceneID, flagFilesMarkAs,
 	)
 	return nil

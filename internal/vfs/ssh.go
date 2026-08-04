@@ -20,7 +20,7 @@ import (
 // SSHConfig describes how to reach the machine holding the library.
 //
 // This backend exists for the common case where Stash and its storage live on
-// a NAS while stash-janitor runs on a workstation that has no mount. It speaks
+// a NAS while custodian runs on a workstation that has no mount. It speaks
 // SFTP rather than shelling out to ssh, which matters for a media library:
 // filenames routinely contain spaces, '+', '(', "'" and '&', all of which are
 // hazards when interpolated into a remote shell command.

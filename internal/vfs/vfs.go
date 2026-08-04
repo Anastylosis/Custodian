@@ -1,4 +1,4 @@
-// Package vfs is the narrow filesystem interface stash-janitor needs in order
+// Package vfs is the narrow filesystem interface custodian needs in order
 // to move sidecar files.
 //
 // Everything else in the tool mutates through Stash's GraphQL API and touches

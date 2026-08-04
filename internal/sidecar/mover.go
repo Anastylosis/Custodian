@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Anastylosis/StashJanitor/internal/pathmap"
-	"github.com/Anastylosis/StashJanitor/internal/vfs"
+	"github.com/Anastylosis/Custodian/internal/pathmap"
+	"github.com/Anastylosis/Custodian/internal/vfs"
 )
 
 // PlannedMove is one sidecar relocation, resolved in both path spaces.

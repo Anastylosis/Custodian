@@ -7,15 +7,15 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/decide"
-	"github.com/Anastylosis/StashJanitor/internal/merge"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/decide"
+	"github.com/Anastylosis/Custodian/internal/merge"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
-// MergePlan is the precomputed work for `stash-janitor scenes apply --action merge`.
+// MergePlan is the precomputed work for `custodian scenes apply --action merge`.
 //
 // Unlike TagPlan we cannot show a per-group metadata-union diff in the
 // dry-run preview without fetching every keeper+losers from Stash, which
@@ -57,13 +57,13 @@ func PrintMergePlan(w io.Writer, p *MergePlan, commit bool) error {
 	if commit {
 		mode = "COMMIT"
 	}
-	fmt.Fprintf(w, "=== stash-janitor scenes apply --action merge (%s) ===\n", mode)
+	fmt.Fprintf(w, "=== custodian scenes apply --action merge (%s) ===\n", mode)
 	fmt.Fprintf(w, "Decided groups in scope:  %d\n", len(p.Groups))
 	fmt.Fprintf(w, "Loser scenes to merge:    %d  (will be folded into their keepers and destroyed)\n", p.TotalLosers)
 	fmt.Fprintf(w, "Reclaimable bytes:        %s  (after post-merge file pruning)\n",
 		confirm.HumanBytes(p.ReclaimableBytes))
 	if len(p.Groups) == 0 {
-		fmt.Fprintln(w, "\nNothing to do. Try `stash-janitor scenes scan` first.")
+		fmt.Fprintln(w, "\nNothing to do. Try `custodian scenes scan` first.")
 		return nil
 	}
 	fmt.Fprintln(w, "\nMerge pipeline per group:")
@@ -285,7 +285,7 @@ func executeOneMerge(
 	winnerIdx, reason := scorer.PickPostMergeKeeper(merged.Files)
 	if winnerIdx == -1 {
 		// Tied — leave the multi-file scene alone, the user can use
-		// `stash-janitor files scan` later to deal with it manually.
+		// `custodian files scan` later to deal with it manually.
 		slog.Warn("post-merge file pick was a tie; leaving multi-file scene for files workflow",
 			"scene_id", merged.ID, "reason", reason)
 		return nil

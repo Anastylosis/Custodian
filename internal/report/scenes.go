@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
 // ScenesStatus is the summary of workflow A's local cache.
@@ -90,12 +90,12 @@ func PrintScenesStatus(w io.Writer, s *ScenesStatus) error {
 	var b strings.Builder
 
 	if s.LastScanRunID == 0 {
-		b.WriteString("No scenes scan has been run yet. Try `stash-janitor scenes scan`.\n")
+		b.WriteString("No scenes scan has been run yet. Try `custodian scenes scan`.\n")
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
 
-	b.WriteString("=== stash-janitor scenes status ===\n")
+	b.WriteString("=== custodian scenes status ===\n")
 	fmt.Fprintf(&b, "Last scan run:    #%d\n", s.LastScanRunID)
 	if s.LastScanStarted != nil {
 		fmt.Fprintf(&b, "  Started:        %s\n", s.LastScanStarted.Local().Format(time.RFC3339))

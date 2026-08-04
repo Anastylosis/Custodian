@@ -1,9 +1,13 @@
-# StashJanitor
+# Custodian
+
+*(formerly StashJanitor)*
 
 A small CLI for finding and resolving duplicate video scenes in a
-[Stash](https://github.com/stashapp/stash) library, safely.
+[Stash](https://github.com/stashapp/stash) library, safely. Custodian
+currently only supports Stash; support for other media managers (e.g. COVE)
+is planned but not yet implemented.
 
-StashJanitor solves three related problems:
+Custodian solves three related problems:
 
 - **Workflow A — cross-scene duplicates.** Two or more separate Stash scenes
   whose perceptual hashes are similar (the same content stored as different
@@ -12,10 +16,10 @@ StashJanitor solves three related problems:
   has more than one file attached because Stash auto-attaches re-detected
   files instead of creating a new scene.
 - **Workflow C — orphan metadata recovery.** Scenes with no stash-box
-  metadata (no `stash_ids`). stash-janitor queries stash-box by phash, finds matches,
+  metadata (no `stash_ids`). custodian queries stash-box by phash, finds matches,
   and links them back so Stash's Scene Tagger can pull the full metadata.
 - **Workflow E — loose subtitles.** Subtitle files that Stash cannot see,
-  because they are not named after their video. stash-janitor matches them to
+  because they are not named after their video. custodian matches them to
   scenes using studio codes, title similarity and — decisively — the subtitle's
   own runtime against the scene duration.
 
@@ -36,29 +40,29 @@ All three workflows work end-to-end against Stash v0.31.0:
 
 | Command | Status |
 |---|---|
-| `stash-janitor config init` / `stash-janitor config show` | ✅ |
-| `stash-janitor stats` (library dashboard) | ✅ |
-| `stash-janitor scenes scan` / `status` / `report` | ✅ |
-| `stash-janitor scenes apply --action tag\|merge\|delete` | ✅ |
-| `stash-janitor scenes mark --group N` or `--signature` | ✅ |
-| `stash-janitor files scan` / `status` / `report` | ✅ |
-| `stash-janitor files apply --commit` (primary swap + deleteFiles) | ✅ |
-| `stash-janitor files mark --scene-id` | ✅ |
-| `stash-janitor orphans scan` / `status` / `report` | ✅ |
-| `stash-janitor orphans scan --endpoint all` (multi-endpoint) | ✅ |
-| `stash-janitor orphans apply --commit` (link to stash-box) | ✅ |
+| `custodian config init` / `custodian config show` | ✅ |
+| `custodian stats` (library dashboard) | ✅ |
+| `custodian scenes scan` / `status` / `report` | ✅ |
+| `custodian scenes apply --action tag\|merge\|delete` | ✅ |
+| `custodian scenes mark --group N` or `--signature` | ✅ |
+| `custodian files scan` / `status` / `report` | ✅ |
+| `custodian files apply --commit` (primary swap + deleteFiles) | ✅ |
+| `custodian files mark --scene-id` | ✅ |
+| `custodian orphans scan` / `status` / `report` | ✅ |
+| `custodian orphans scan --endpoint all` (multi-endpoint) | ✅ |
+| `custodian orphans apply --commit` (link to stash-box) | ✅ |
 | `--submit-fingerprints` (all apply commands) | ✅ |
-| `stash-janitor review` (interactive TUI) | ✅ |
+| `custodian review` (interactive TUI) | ✅ |
 | Per-loser "kept by: ..." explanations in reports | ✅ |
 | Filename-info-loss safety net (workflow A) | ✅ |
 | Rename-on-merge (preserve loser filename info) | ✅ |
 | Filename-to-metadata extraction on merge | ✅ |
-| Stale-cache detection in `stash-janitor stats` | ✅ |
+| Stale-cache detection in `custodian stats` | ✅ |
 | Orphans scan progress indicator with ETA | ✅ |
-| `stash-janitor organize scan` / `report` / `apply` | ✅ |
+| `custodian organize scan` / `report` / `apply` | ✅ |
 | Sidecars: subtitles follow videos on move/rename | ✅ |
-| `stash-janitor sidecars check` (access + path-map doctor) | ✅ |
-| `stash-janitor subs scan` / `apply` (match loose subtitles) | ✅ |
+| `custodian sidecars check` (access + path-map doctor) | ✅ |
+| `custodian subs scan` / `apply` (match loose subtitles) | ✅ |
 
 ### Subtitles
 
@@ -68,16 +72,16 @@ the scene. Captions therefore have no file ID, and Stash's `moveFiles` mutation
 (which takes `ids: [ID!]`) **cannot move them**. Any video that `organize`
 relocates would leave its subtitles behind, silently detaching the captions.
 
-StashJanitor handles both halves of that problem:
+Custodian handles both halves of that problem:
 
 ```sh
 # Keep subtitles attached: they follow videos on move/rename, language intact.
 #   clip.en.srt -> 2024-01-01_New.Name_4k.en.srt
-stash-janitor sidecars check          # verify access + path mapping first
+custodian sidecars check          # verify access + path mapping first
 
 # Fix subtitles that are ALREADY adrift: match them back to scenes.
-stash-janitor subs scan  --dir ~/Downloads/Subs
-stash-janitor subs apply --dir ~/Downloads/Subs --commit
+custodian subs scan  --dir ~/Downloads/Subs
+custodian subs apply --dir ~/Downloads/Subs --commit
 ```
 
 Matching combines studio/JAV codes, name similarity and — decisively — the
@@ -110,33 +114,33 @@ See [MANUAL.md](MANUAL.md) for usage instructions and
 
 **Option A: Download a release binary** (no Go required)
 
-Go to the [Releases](https://github.com/Anastylosis/StashJanitor/releases)
+Go to the [Releases](https://github.com/Anastylosis/Custodian/releases)
 page, download the archive for your platform, and extract:
 
 ```sh
 # Linux (amd64)
-tar xzf stash-janitor-v*-linux-amd64.tar.gz
-chmod +x stash-janitor
+tar xzf custodian-v*-linux-amd64.tar.gz
+chmod +x custodian
 
 # macOS (Apple Silicon)
-tar xzf stash-janitor-v*-darwin-arm64.tar.gz
-chmod +x stash-janitor
+tar xzf custodian-v*-darwin-arm64.tar.gz
+chmod +x custodian
 
-# Windows — extract the .zip, you get stash-janitor.exe
+# Windows — extract the .zip, you get custodian.exe
 ```
 
 **Option B: Build from source** (requires Go 1.22+)
 
 ```sh
-git clone https://github.com/Anastylosis/StashJanitor.git
-cd StashJanitor
-go build -o stash-janitor ./cmd/stash-janitor
+git clone https://github.com/Anastylosis/Custodian.git
+cd Custodian
+go build -o custodian ./cmd/custodian
 ```
 
 **Option C: `go install`**
 
 ```sh
-go install github.com/Anastylosis/StashJanitor/cmd/stash-janitor@latest
+go install github.com/Anastylosis/Custodian/cmd/custodian@latest
 ```
 
 The binary is fully self-contained (pure-Go SQLite, no cgo, no runtime deps).
@@ -145,7 +149,7 @@ The binary is fully self-contained (pure-Go SQLite, no cgo, no runtime deps).
 
 ```sh
 # 1. Generate a config file. This creates config.yaml in the current dir.
-./stash-janitor config init
+./custodian config init
 
 # 2. Edit config.yaml — set your Stash URL:
 #    stash:
@@ -156,32 +160,32 @@ The binary is fully self-contained (pure-Go SQLite, no cgo, no runtime deps).
 export STASH_API_KEY=...
 
 # 4. See where you're at.
-./stash-janitor stats
+./custodian stats
 
 # 4. Scan and review cross-scene duplicates.
-./stash-janitor scenes scan
-./stash-janitor scenes report --filter decided | less
+./custodian scenes scan
+./custodian scenes report --filter decided | less
 
 # 5. Apply (safest first pass: just tag).
-./stash-janitor scenes apply --action tag --commit
+./custodian scenes apply --action tag --commit
 
 # 6. Or go full merge (preserves metadata, renames files, reclaims disk):
-./stash-janitor scenes apply --action merge --commit
+./custodian scenes apply --action merge --commit
 
 # 7. Clean up multi-file scenes.
-./stash-janitor files scan
-./stash-janitor files report | less
-./stash-janitor files apply --commit
+./custodian files scan
+./custodian files report | less
+./custodian files apply --commit
 
 # 8. Find metadata for orphan scenes via stash-box.
-./stash-janitor orphans scan --max-scenes 500
-./stash-janitor orphans report --filter matched
-./stash-janitor orphans apply --commit
+./custodian orphans scan --max-scenes 500
+./custodian orphans report --filter matched
+./custodian orphans apply --commit
 ```
 
 ## Configuration
 
-`stash-janitor config init` writes a fully-commented `config.yaml` next to the binary.
+`custodian config init` writes a fully-commented `config.yaml` next to the binary.
 The most important sections:
 
 ```yaml
@@ -224,19 +228,19 @@ The full default file is at
 [`internal/config/default.yaml`](internal/config/default.yaml) — every
 field is documented inline.
 
-`stash-janitor config show` prints the *effective* config (defaults merged with your
+`custodian config show` prints the *effective* config (defaults merged with your
 overrides), which is helpful when debugging "is my override being applied?".
 
 ## Workflow A — cross-scene duplicates
 
 Stash exposes
 `findDuplicateScenes(distance, duration_diff)` which returns groups of
-perceptually-similar scenes server-side. `stash-janitor scenes scan` consumes those
+perceptually-similar scenes server-side. `custodian scenes scan` consumes those
 groups, scores each one with the configured rule chain, and writes the
 results into the local SQLite cache.
 
 ```sh
-./stash-janitor scenes scan --distance 4 --duration-diff 1.0
+./custodian scenes scan --distance 4 --duration-diff 1.0
 ```
 
 Useful flags:
@@ -249,17 +253,17 @@ Useful flags:
 Once scanned, the local cache is offline-readable:
 
 ```sh
-./stash-janitor scenes status                              # summary + reclaimable bytes
-./stash-janitor scenes report --filter all                 # every group
-./stash-janitor scenes report --filter needs-review        # groups the scorer couldn't decide
-./stash-janitor scenes report --filter decided --json      # machine-readable output
+./custodian scenes status                              # summary + reclaimable bytes
+./custodian scenes report --filter all                 # every group
+./custodian scenes report --filter needs-review        # groups the scorer couldn't decide
+./custodian scenes report --filter decided --json      # machine-readable output
 ```
 
 ### Apply: tag mode (safe)
 
 ```sh
-./stash-janitor scenes apply --action tag           # dry run
-./stash-janitor scenes apply --action tag --commit  # actually tag in Stash
+./custodian scenes apply --action tag           # dry run
+./custodian scenes apply --action tag --commit  # actually tag in Stash
 ```
 
 Tag mode finds-or-creates two tags (default `_dedupe_loser` and
@@ -271,9 +275,9 @@ and bulk-delete the ones you agree with.
 ### Apply: merge mode (destructive)
 
 ```sh
-./stash-janitor scenes apply --action merge           # dry run
-./stash-janitor scenes apply --action merge --commit  # interactive YES prompt
-./stash-janitor scenes apply --action merge --commit --yes  # bypass prompt for cron
+./custodian scenes apply --action merge           # dry run
+./custodian scenes apply --action merge --commit  # interactive YES prompt
+./custodian scenes apply --action merge --commit --yes  # bypass prompt for cron
 ```
 
 Merge mode does the full cross-scene consolidation per group:
@@ -306,11 +310,11 @@ in `pkg/scene/scan.go` in v0.31.0), so all files within a single scene are
 mod_time — tech specs are guaranteed identical.
 
 ```sh
-./stash-janitor files scan
-./stash-janitor files status
-./stash-janitor files report --filter decided   # each loser shows WHY it lost
-./stash-janitor files apply                     # dry run
-./stash-janitor files apply --commit            # swap primary + delete losers
+./custodian files scan
+./custodian files status
+./custodian files report --filter decided   # each loser shows WHY it lost
+./custodian files apply                     # dry run
+./custodian files apply --commit            # swap primary + delete losers
 ```
 
 The default `filename_quality` regex matches
@@ -319,15 +323,15 @@ like `_1080p_1.mp4` and resolutions up to 8K.
 
 ## Workflow C — orphan metadata recovery
 
-Scenes with no `stash_ids` (55% of a typical library) are "orphans". stash-janitor
+Scenes with no `stash_ids` (55% of a typical library) are "orphans". custodian
 queries stash-box by phash to find matches, then links them back to Stash.
 
 ```sh
-./stash-janitor orphans scan --max-scenes 500     # start small (stash-box is slow)
-./stash-janitor orphans report --filter matched   # review proposed matches
-./stash-janitor orphans apply --commit            # write stash_ids back
-./stash-janitor orphans scan                      # full library (re-runs skip cache)
-./stash-janitor orphans scan --endpoint all       # query every configured stash-box
+./custodian orphans scan --max-scenes 500     # start small (stash-box is slow)
+./custodian orphans report --filter matched   # review proposed matches
+./custodian orphans apply --commit            # write stash_ids back
+./custodian orphans scan                      # full library (re-runs skip cache)
+./custodian orphans scan --endpoint all       # query every configured stash-box
 ```
 
 After applying, run Stash's built-in Scene Tagger to pull full metadata
@@ -353,7 +357,7 @@ After applying, run Stash's built-in Scene Tagger to pull full metadata
    matters. Works seamlessly with NAS / Docker setups.
 7. **API key never logged, never stored in config**, only read from env.
 8. **`needs_review` groups are never applied automatically.**
-9. **Stale-cache detection.** `stash-janitor stats` samples cached scene IDs and
+9. **Stale-cache detection.** `custodian stats` samples cached scene IDs and
    warns when they no longer exist in Stash.
 
 ## Tests
@@ -370,19 +374,19 @@ The integration tests are env-gated so `go test ./...` stays hermetic.
 
 ```
 ┌──────────────┐  GraphQL   ┌──────────┐
-│ stash-janitor (binary) │ ─────────► │  Stash   │ ── manages files on disk
+│ custodian (binary) │ ─────────► │  Stash   │ ── manages files on disk
 └──────┬───────┘            └──────────┘
        │
        ▼
 ┌──────────────┐
-│ stash-janitor.sqlite   │  ← scan cache, decisions, history
+│ custodian.sqlite   │  ← scan cache, decisions, history
 └──────────────┘
 ```
 
 Module layout:
 
 ```
-cmd/stash-janitor/main.go        — entry point
+cmd/custodian/main.go        — entry point
 internal/cli/          — cobra command tree (scenes, files, orphans, stats, config)
 internal/config/       — YAML loader (embedded defaults)
 internal/stash/        — GraphQL client + query catalog (v0.31.0)
@@ -401,10 +405,10 @@ Moves and renames files on disk (via Stash's `moveFiles` API) so your
 library has a consistent, browsable directory structure based on metadata.
 
 ```sh
-./stash-janitor organize scan                     # compute ideal paths for every scene
-./stash-janitor organize report                   # show proposed moves
-./stash-janitor organize report --filter conflict # naming collisions
-./stash-janitor organize apply --commit           # actually move files via Stash
+./custodian organize scan                     # compute ideal paths for every scene
+./custodian organize report                   # show proposed moves
+./custodian organize report --filter conflict # naming collisions
+./custodian organize apply --commit           # actually move files via Stash
 ```
 
 The default template produces your existing convention:
@@ -419,18 +423,18 @@ organize:
 ```
 
 Scenes without the required metadata (performer + date by default) are
-skipped and left where they are. Run `stash-janitor orphans scan` + Stash Scene
+skipped and left where they are. Run `custodian orphans scan` + Stash Scene
 Tagger first to maximize metadata coverage, then organize.
 
 ## Interactive review (TUI)
 
-`stash-janitor review` launches a terminal UI for walking through duplicate
+`custodian review` launches a terminal UI for walking through duplicate
 groups. Especially useful for `needs_review` groups where the scorer couldn't
 auto-decide and you need to pick a keeper manually.
 
 ```sh
-./stash-janitor review                          # decided + needs_review groups
-./stash-janitor review --filter needs-review    # just the ones that need you
+./custodian review                          # decided + needs_review groups
+./custodian review --filter needs-review    # just the ones that need you
 ```
 
 - **For `needs_review` groups**: press `o` to pick which scene to keep, then
@@ -442,8 +446,8 @@ auto-decide and you need to pick a keeper manually.
 The TUI only saves decisions locally. After reviewing, re-scan and apply:
 
 ```sh
-stash-janitor scenes scan
-stash-janitor scenes apply --action merge --commit
+custodian scenes scan
+custodian scenes apply --action merge --commit
 ```
 
 See [MANUAL.md](MANUAL.md) for the full review-to-delete walkthrough.
@@ -454,5 +458,5 @@ See [MANUAL.md](MANUAL.md) for the full review-to-delete walkthrough.
 - [MANUAL.md](MANUAL.md) — step-by-step user guide
 - [internal/config/default.yaml](internal/config/default.yaml) — every config
   field documented inline
-- `./stash-janitor help` — cobra-generated command tree
-- `./stash-janitor scenes help`, `./stash-janitor files help`, `./stash-janitor orphans help` — workflow-specific help
+- `./custodian help` — cobra-generated command tree
+- `./custodian scenes help`, `./custodian files help`, `./custodian orphans help` — workflow-specific help

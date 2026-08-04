@@ -6,7 +6,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/Anastylosis/StashJanitor/internal/pathmap"
+	"github.com/Anastylosis/Custodian/internal/pathmap"
 )
 
 // Summary counts matches by verdict.

@@ -19,10 +19,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
 // TagPlan is the precomputed work for the `scenes apply --action tag` flow.
@@ -83,14 +83,14 @@ func PrintTagPlan(w io.Writer, p *TagPlan, cfg *config.Config, commit bool) erro
 	if commit {
 		mode = "COMMIT"
 	}
-	fmt.Fprintf(w, "=== stash-janitor scenes apply --action tag (%s) ===\n", mode)
+	fmt.Fprintf(w, "=== custodian scenes apply --action tag (%s) ===\n", mode)
 	fmt.Fprintf(w, "Decided groups in scope:  %d\n", len(p.Groups))
 	fmt.Fprintf(w, "Keeper scenes to tag:     %d  (tag: %q)\n", len(p.KeeperSceneIDs), cfg.Apply.Scenes.KeeperTag)
 	fmt.Fprintf(w, "Loser scenes to tag:      %d  (tag: %q)\n", len(p.LoserSceneIDs), cfg.Apply.Scenes.LoserTag)
 	fmt.Fprintf(w, "Reclaimable (if you delete losers in Stash UI afterward): %s\n",
 		confirm.HumanBytes(p.ReclaimableBytes))
 	if len(p.Groups) == 0 {
-		fmt.Fprintln(w, "\nNothing to do. Try `stash-janitor scenes scan` first.")
+		fmt.Fprintln(w, "\nNothing to do. Try `custodian scenes scan` first.")
 	}
 	if !commit {
 		fmt.Fprintln(w, "\nThis was a dry run. Re-run with --commit to apply tags in Stash.")

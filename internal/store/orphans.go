@@ -63,7 +63,7 @@ func (s *Store) UpsertOrphanLookup(ctx context.Context, o *OrphanLookup) error {
 }
 
 // HasOrphanLookup reports whether (scene, endpoint) already has a row in
-// orphan_lookups across any scan run. Used by `stash-janitor orphans scan` to skip
+// orphan_lookups across any scan run. Used by `custodian orphans scan` to skip
 // previously-looked-up orphans on re-runs (unless --rescan is set).
 func (s *Store) HasOrphanLookup(ctx context.Context, sceneID, endpoint string) (bool, error) {
 	var n int
@@ -130,7 +130,7 @@ func (s *Store) ListOrphanLookups(ctx context.Context, statuses []string) ([]*Or
 }
 
 // MarkOrphanLookupApplied flips the row's status to "applied" and records
-// applied_at. Used by `stash-janitor orphans apply --commit` after writing the
+// applied_at. Used by `custodian orphans apply --commit` after writing the
 // stash_id back to Stash.
 func (s *Store) MarkOrphanLookupApplied(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx,

@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Anastylosis/StashJanitor/internal/apply"
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/decide"
-	"github.com/Anastylosis/StashJanitor/internal/report"
-	"github.com/Anastylosis/StashJanitor/internal/scan"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/apply"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/decide"
+	"github.com/Anastylosis/Custodian/internal/report"
+	"github.com/Anastylosis/Custodian/internal/scan"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +40,7 @@ var (
 	flagScenesMarkNotes     string
 )
 
-// newScenesCmd builds the `stash-janitor scenes` subcommand tree (workflow A).
+// newScenesCmd builds the `custodian scenes` subcommand tree (workflow A).
 //
 // All children are stubs in Phase 1 task #1; subsequent tasks fill them in:
 //
@@ -101,7 +101,7 @@ requires an interactive YES confirmation (or --yes for scripted use).`,
 		Use:   "mark",
 		Short: "Persist a manual override for a duplicate group",
 		Long: `Persist a decision about a duplicate group that survives across scan
-re-runs. Stored locally in stash-janitor.sqlite, keyed by the group signature
+re-runs. Stored locally in custodian.sqlite, keyed by the group signature
 (sorted scene IDs joined by '|').
 
 Decisions:
@@ -111,13 +111,13 @@ Decisions:
   force_keeper     Override the scorer's pick. Requires --keeper SCENE_ID.
                    Future scans will use the pinned keeper instead of scoring.
 
-Use 'stash-janitor scenes report' to find the group # or signature you want to mark.
+Use 'custodian scenes report' to find the group # or signature you want to mark.
 
 You can identify the group either by the # shown in the report:
-  stash-janitor scenes mark --group 224 --as not_duplicate
+  custodian scenes mark --group 224 --as not_duplicate
 
 Or by the full signature:
-  stash-janitor scenes mark --signature "22871|83186" --as not_duplicate`,
+  custodian scenes mark --signature "22871|83186" --as not_duplicate`,
 		RunE: runScenesMark,
 	}
 	markCmd.Flags().StringVar(&flagScenesMarkSignature, "signature", "", "group signature (sorted scene IDs joined by |)")
@@ -147,7 +147,7 @@ func loadConfigAndStore() (*config.Config, *store.Store, *stash.Client, func(), 
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	// Ensure the DB directory exists (for XDG paths like ~/.local/share/stash-janitor/).
+	// Ensure the DB directory exists (for XDG paths like ~/.local/share/custodian/).
 	if err := config.EnsureDir(dbPath); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("creating db directory: %w", err)
 	}
@@ -188,7 +188,7 @@ func runScenesScan(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "  decided:          %d\n", res.Decided)
 	fmt.Fprintf(out, "  needs_review:     %d\n", res.NeedsReview)
 	fmt.Fprintf(out, "  dismissed:        %d\n", res.Dismissed)
-	fmt.Fprintln(out, "\nNext: `stash-janitor scenes status` for reclaimable bytes, `stash-janitor scenes report` for per-group detail.")
+	fmt.Fprintln(out, "\nNext: `custodian scenes status` for reclaimable bytes, `custodian scenes report` for per-group detail.")
 	return nil
 }
 
@@ -427,7 +427,7 @@ func runScenesMark(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "resolved group #%d → signature %s\n", flagScenesMarkGroup, signature)
 	}
 	if signature == "" {
-		return fmt.Errorf("--signature or --group is required (run `stash-janitor scenes report` to find one)")
+		return fmt.Errorf("--signature or --group is required (run `custodian scenes report` to find one)")
 	}
 
 	d := store.UserDecision{
@@ -441,7 +441,7 @@ func runScenesMark(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(),
-		"recorded: signature=%s decision=%s%s\nThis override applies to future `stash-janitor scenes scan` runs.\n",
+		"recorded: signature=%s decision=%s%s\nThis override applies to future `custodian scenes scan` runs.\n",
 		signature, flagScenesMarkAs,
 		map[bool]string{true: " keeper=" + flagScenesMarkKeeper, false: ""}[flagScenesMarkKeeper != ""],
 	)

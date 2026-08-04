@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/stash"
 )
 
 func defaultCfg() *config.OrganizeConfig {

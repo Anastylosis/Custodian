@@ -11,7 +11,7 @@ import (
 )
 
 // Local is an FS backed by the machine's own filesystem. It covers running
-// stash-janitor directly on the NAS, on a Linux box with the share mounted,
+// custodian directly on the NAS, on a Linux box with the share mounted,
 // and on Windows with a mapped drive or UNC path.
 type Local struct{}
 

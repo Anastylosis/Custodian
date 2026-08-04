@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
+	"github.com/Anastylosis/Custodian/internal/config"
 	"github.com/spf13/cobra"
 )
 
-// newConfigCmd builds the `stash-janitor config` subcommand tree. Currently only `init`
+// newConfigCmd builds the `custodian config` subcommand tree. Currently only `init`
 // is planned for Phase 1; future commands (validate, show) can be added here.
 func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Manage the stash-janitor config file",
+		Short: "Manage the custodian config file",
 	}
 
 	cmd.AddCommand(&cobra.Command{
@@ -35,7 +35,7 @@ func newConfigCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "wrote default config to %s\n", path)
-			fmt.Fprintf(cmd.OutOrStdout(), "edit stash.url to point at your Stash instance, then run `stash-janitor stats`\n")
+			fmt.Fprintf(cmd.OutOrStdout(), "edit stash.url to point at your Stash instance, then run `custodian stats`\n")
 			return nil
 		},
 	})

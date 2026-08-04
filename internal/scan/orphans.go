@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
-// OrphansOptions configures one invocation of `stash-janitor orphans scan`.
+// OrphansOptions configures one invocation of `custodian orphans scan`.
 type OrphansOptions struct {
 	// Endpoint is the stash-box endpoint to query. If empty, the scanner
 	// auto-discovers via Stash's configuration query and uses the first

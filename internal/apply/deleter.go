@@ -7,12 +7,12 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
-// DeletePlan is the precomputed work for `stash-janitor scenes apply --action delete`.
+// DeletePlan is the precomputed work for `custodian scenes apply --action delete`.
 //
 // Structurally identical to MergePlan — both walk the decided groups and
 // sum loser file sizes — but the execute path is different: delete just
@@ -52,12 +52,12 @@ func PrintDeletePlan(w io.Writer, p *DeletePlan, commit bool) error {
 	if commit {
 		mode = "COMMIT"
 	}
-	fmt.Fprintf(w, "=== stash-janitor scenes apply --action delete (%s) ===\n", mode)
+	fmt.Fprintf(w, "=== custodian scenes apply --action delete (%s) ===\n", mode)
 	fmt.Fprintf(w, "Decided groups in scope:  %d\n", len(p.Groups))
 	fmt.Fprintf(w, "Loser scenes to destroy:  %d\n", p.TotalLosers)
 	fmt.Fprintf(w, "Reclaimable bytes:        %s\n", confirm.HumanBytes(p.ReclaimableBytes))
 	if len(p.Groups) == 0 {
-		fmt.Fprintln(w, "\nNothing to do. Try `stash-janitor scenes scan` first.")
+		fmt.Fprintln(w, "\nNothing to do. Try `custodian scenes scan` first.")
 		return nil
 	}
 	fmt.Fprintln(w, "\nDelete pipeline per group:")

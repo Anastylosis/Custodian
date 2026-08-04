@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Anastylosis/StashJanitor/internal/pathmap"
-	"github.com/Anastylosis/StashJanitor/internal/sidecar"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/pathmap"
+	"github.com/Anastylosis/Custodian/internal/sidecar"
+	"github.com/Anastylosis/Custodian/internal/stash"
 	"github.com/spf13/cobra"
 )
 
@@ -29,12 +29,12 @@ func newSidecarsCmd() *cobra.Command {
 Stash does not index them as files. It looks next to each video at scan
 time and attaches whatever it finds as a property of the scene, so a
 caption has no file ID and Stash's moveFiles mutation cannot move it.
-When organize moves a video, stash-janitor must move the sidecars itself
+When organize moves a video, custodian must move the sidecars itself
 — which means it needs real access to the library.
 
 Because Stash reports paths from inside its own process (typically
 /data/...), those usually have to be mapped to something reachable from
-wherever stash-janitor runs. This command verifies that mapping against
+wherever custodian runs. This command verifies that mapping against
 your real library before you rely on it.`,
 	}
 
@@ -77,7 +77,7 @@ func runSidecarsCheck(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(out, "extensions: %s\n", strings.Join(exts, ", "))
 
 	if len(cfg.Sidecars.PathMap) == 0 {
-		fmt.Fprintln(out, "\npath_map: (none) — assuming stash-janitor sees exactly the paths")
+		fmt.Fprintln(out, "\npath_map: (none) — assuming custodian sees exactly the paths")
 		fmt.Fprintln(out, "Stash reports. That is correct only when it runs on the same")
 		fmt.Fprintln(out, "filesystem as Stash.")
 	} else {

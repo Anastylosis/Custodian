@@ -2,7 +2,7 @@ package store
 
 import "time"
 
-// ScanRun records one invocation of `stash-janitor scenes scan` or `stash-janitor files scan`.
+// ScanRun records one invocation of `custodian scenes scan` or `custodian files scan`.
 type ScanRun struct {
 	ID           int64      `json:"id"`
 	Workflow     string     `json:"workflow"` // WorkflowScenes | WorkflowFiles

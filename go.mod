@@ -1,4 +1,4 @@
-module github.com/Anastylosis/StashJanitor
+module github.com/Anastylosis/Custodian
 
 go 1.25.0
 

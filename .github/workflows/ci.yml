@@ -112,6 +112,6 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          binary="stash-janitor"
-          if [ "$GOOS" = "windows" ]; then binary="stash-janitor.exe"; fi
-          go build -o "$binary" ./cmd/stash-janitor
+          binary="custodian"
+          if [ "$GOOS" = "windows" ]; then binary="custodian.exe"; fi
+          go build -o "$binary" ./cmd/custodian

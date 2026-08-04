@@ -129,7 +129,7 @@ func (s *Store) ListFileGroups(ctx context.Context, statuses []string) ([]*FileG
 }
 
 // MarkFileGroupApplied marks a file group as applied. Used by Phase 1.5
-// `stash-janitor files apply --commit`.
+// `custodian files apply --commit`.
 func (s *Store) MarkFileGroupApplied(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE file_groups SET applied_at = ?, status = ? WHERE id = ?`,

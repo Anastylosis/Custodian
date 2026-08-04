@@ -1,32 +1,32 @@
-# StashJanitor User Manual
+# Custodian User Manual
 
 ## Install
 
 **Download a release binary** from the
-[Releases](https://github.com/Anastylosis/StashJanitor/releases) page — no
+[Releases](https://github.com/Anastylosis/Custodian/releases) page — no
 Go toolchain required. Extract and you're ready.
 
 Or build from source:
 ```sh
-git clone https://github.com/Anastylosis/StashJanitor.git
-cd StashJanitor
-go build -o stash-janitor ./cmd/stash-janitor
+git clone https://github.com/Anastylosis/Custodian.git
+cd Custodian
+go build -o custodian ./cmd/custodian
 ```
 
 Or via `go install`:
 ```sh
-go install github.com/Anastylosis/StashJanitor/cmd/stash-janitor@latest
+go install github.com/Anastylosis/Custodian/cmd/custodian@latest
 ```
 
 The binary is fully self-contained (pure-Go SQLite, no cgo, no runtime deps).
 Put it wherever you like — a dedicated directory is handy because it also
-creates `config.yaml` and `stash-janitor.sqlite` next to itself.
+creates `config.yaml` and `custodian.sqlite` next to itself.
 
 ## First-time setup
 
 ```sh
 # 1. Generate a config file in the current directory.
-stash-janitor config init
+custodian config init
 ```
 
 This creates `config.yaml` with commented defaults. Open it and set
@@ -46,14 +46,14 @@ configured, you can leave `STASH_API_KEY` unset.
 export STASH_API_KEY=your-key-here
 ```
 
-The config file and the SQLite cache (`stash-janitor.sqlite`) are
+The config file and the SQLite cache (`custodian.sqlite`) are
 created in whatever directory you run the command from. You can override
 their locations with `--config <path>` and `--db <path>`.
 
 To verify connectivity and see your library at a glance:
 
 ```sh
-stash-janitor stats
+custodian stats
 ```
 
 This shows Stash version, total scenes, library size, percentage with
@@ -62,7 +62,7 @@ It also warns if cached scenes no longer exist in Stash (stale cache).
 
 ## The three workflows
 
-stash-janitor has three independent workflows. Run whichever ones apply to you —
+custodian has three independent workflows. Run whichever ones apply to you —
 they don't depend on each other.
 
 ---
@@ -72,21 +72,21 @@ they don't depend on each other.
 **Problem:** Two separate Stash scenes contain the same video, maybe at
 different resolutions or bitrates.
 
-**What stash-janitor does:** Asks Stash for perceptually-similar scene groups (via
+**What custodian does:** Asks Stash for perceptually-similar scene groups (via
 phash), scores each group to pick a keeper, and lets you tag, merge, or
 delete the losers.
 
 #### 1. Scan
 
 ```sh
-stash-janitor scenes scan
+custodian scenes scan
 ```
 
 This calls `findDuplicateScenes` on your Stash. At distance=4 (default)
 it catches re-encodes; at distance=0 it only catches exact phash matches.
 
 Takes ~2 seconds even at 60k scenes. All results are stored locally in
-`stash-janitor.sqlite` — no need to re-scan unless your library changes.
+`custodian.sqlite` — no need to re-scan unless your library changes.
 
 Useful flags:
 - `--distance 0` — strictest (byte-equivalent phash only)
@@ -97,16 +97,16 @@ Useful flags:
 
 ```sh
 # One-line summary.
-stash-janitor scenes status
+custodian scenes status
 
 # Detailed per-group report. Each loser shows WHY it lost.
-stash-janitor scenes report --filter decided | less
+custodian scenes report --filter decided | less
 
 # Only groups the tool couldn't auto-decide:
-stash-janitor scenes report --filter needs-review
+custodian scenes report --filter needs-review
 
 # Machine-readable:
-stash-janitor scenes report --json > groups.json
+custodian scenes report --json > groups.json
 ```
 
 Example output:
@@ -126,16 +126,16 @@ report (easier) or the full signature:
 
 ```sh
 # By group number from the report:
-stash-janitor scenes mark --group 224 --as not_duplicate
+custodian scenes mark --group 224 --as not_duplicate
 
 # Or by full signature:
-stash-janitor scenes mark --signature "22871|83186" --as not_duplicate
+custodian scenes mark --signature "22871|83186" --as not_duplicate
 
 # Pin a specific keeper (overrides the scorer's pick):
-stash-janitor scenes mark --group 224 --as force_keeper --keeper 83186
+custodian scenes mark --group 224 --as force_keeper --keeper 83186
 
 # Then re-scan to apply the override:
-stash-janitor scenes scan
+custodian scenes scan
 ```
 
 #### 4. Apply
@@ -144,17 +144,17 @@ Three action modes, from safest to most aggressive:
 
 **Tag (safest — no data loss possible):**
 ```sh
-stash-janitor scenes apply --action tag              # preview (dry run)
-stash-janitor scenes apply --action tag --commit     # actually tag in Stash
+custodian scenes apply --action tag              # preview (dry run)
+custodian scenes apply --action tag --commit     # actually tag in Stash
 ```
 Adds `_dedupe_loser` / `_dedupe_keeper` tags. Then go to Stash UI, filter
 by `_dedupe_loser`, eyeball, bulk-delete what you agree with.
 
 **Merge (recommended — preserves all metadata):**
 ```sh
-stash-janitor scenes apply --action merge              # preview
-stash-janitor scenes apply --action merge --commit     # interactive YES prompt
-stash-janitor scenes apply --action merge --commit --yes  # scripted/cron
+custodian scenes apply --action merge              # preview
+custodian scenes apply --action merge --commit     # interactive YES prompt
+custodian scenes apply --action merge --commit --yes  # scripted/cron
 ```
 Per group, the merge pipeline:
 1. Computes a metadata union (tags, performers, stash_ids, urls, play
@@ -172,7 +172,7 @@ Per group, the merge pipeline:
 
 **Delete (destructive — use only when losers have nothing to preserve):**
 ```sh
-stash-janitor scenes apply --action delete --commit
+custodian scenes apply --action delete --commit
 ```
 Calls `scenesDestroy(delete_file: true)` on every loser. No metadata
 preservation. No rename. You see a warning explaining why merge is
@@ -180,7 +180,7 @@ better in most cases.
 
 **Submit fingerprints to stash-box (optional, any mode):**
 ```sh
-stash-janitor scenes apply --action tag --commit --submit-fingerprints
+custodian scenes apply --action tag --commit --submit-fingerprints
 ```
 After a successful commit, sends the keeper scenes' fingerprints to
 stash-box so future users who have the same files get automatic matches.
@@ -192,16 +192,16 @@ stash-box so future users who have the same files get automatic matches.
 **Problem:** A single Stash scene has 2+ files attached (Stash auto-
 attaches files with the same oshash/md5). Only one file is needed.
 
-**What stash-janitor does:** Scores the files by filename quality, path priority,
+**What custodian does:** Scores the files by filename quality, path priority,
 and modification time. Picks the best one as primary, deletes the rest.
 
 ```sh
-stash-janitor files scan
-stash-janitor files status
-stash-janitor files report | less                # each loser shows WHY it lost
-stash-janitor files apply                        # preview
-stash-janitor files apply --commit               # interactive YES → delete losers
-stash-janitor files apply --commit --yes         # scripted
+custodian files scan
+custodian files status
+custodian files report | less                # each loser shows WHY it lost
+custodian files apply                        # preview
+custodian files apply --commit               # interactive YES → delete losers
+custodian files apply --commit --yes         # scripted
 ```
 
 The filename scoring uses a configurable regex. The default matches your
@@ -213,7 +213,7 @@ rule decided.
 
 Override a specific scene:
 ```sh
-stash-janitor files mark --scene-id 56297 --as keep_all
+custodian files mark --scene-id 56297 --as keep_all
 ```
 
 ---
@@ -223,27 +223,27 @@ stash-janitor files mark --scene-id 56297 --as keep_all
 **Problem:** Many scenes have no stash-box metadata (no stash_ids). The
 filename is the only clue to what the scene is.
 
-**What stash-janitor does:** Enumerates orphan scenes (stash_id_count = 0), queries
+**What custodian does:** Enumerates orphan scenes (stash_id_count = 0), queries
 your configured stash-box by phash, stores matches locally for review.
 Applying writes the stash_id link back to Stash so Stash's built-in
 Scene Tagger can then pull the full metadata.
 
 ```sh
 # Start small — this is the slow workflow.
-stash-janitor orphans scan --max-scenes 500
+custodian orphans scan --max-scenes 500
 
 # See what stash-box recognized.
-stash-janitor orphans report --filter matched
+custodian orphans report --filter matched
 
 # Link the matches back to Stash.
-stash-janitor orphans apply --commit
+custodian orphans apply --commit
 
 # Then in Stash UI: run the Scene Tagger to pull metadata
 # (title, performers, tags, studio, date) from stash-box.
 
 # Later, scan the rest. Re-runs skip already-queried scenes.
-stash-janitor orphans scan --max-scenes 5000
-stash-janitor orphans scan                       # full library (may take 30+ min)
+custodian orphans scan --max-scenes 5000
+custodian orphans scan                       # full library (may take 30+ min)
 ```
 
 Useful flags:
@@ -263,9 +263,9 @@ and estimated time remaining:
 
 ---
 
-## The local cache (stash-janitor.sqlite)
+## The local cache (custodian.sqlite)
 
-Every scan stores its results in a SQLite file (default `./stash-janitor.sqlite`).
+Every scan stores its results in a SQLite file (default `./custodian.sqlite`).
 This serves three purposes:
 
 1. **Speed.** Reports and apply commands read from SQLite, not Stash.
@@ -278,16 +278,16 @@ This serves three purposes:
 3. **Idempotency.** Applied groups are recorded. Re-running `apply` is
    safe — already-applied groups are skipped.
 
-You can delete `stash-janitor.sqlite` at any time and re-scan. All source-of-truth
+You can delete `custodian.sqlite` at any time and re-scan. All source-of-truth
 data lives in Stash; the SQLite is a read cache and decision journal.
 
-**Stale-cache detection:** `stash-janitor stats` samples a few cached scene IDs
+**Stale-cache detection:** `custodian stats` samples a few cached scene IDs
 and warns if any no longer exist in Stash. If you see the warning, just
-re-scan (`stash-janitor scenes scan`, `stash-janitor files scan`).
+re-scan (`custodian scenes scan`, `custodian files scan`).
 
 ## Configuration reference
 
-`stash-janitor config init` generates a fully-commented `config.yaml`. Key sections:
+`custodian config init` generates a fully-commented `config.yaml`. Key sections:
 
 | Section | What it controls |
 |---|---|
@@ -313,7 +313,7 @@ re-scan (`stash-janitor scenes scan`, `stash-janitor files scan`).
 | `orphans.write_stash_id_on_apply` | Auto-link stash_ids during orphans apply (default: `false`) |
 | `orphans.write_metadata_on_apply` | Also write title/date from scrape (default: `false`) |
 
-Run `stash-janitor config show` to see the *effective* config after merging defaults
+Run `custodian config show` to see the *effective* config after merging defaults
 with your overrides.
 
 ---
@@ -324,42 +324,42 @@ with your overrides.
 with inconsistent names. You want a clean, browsable structure based
 on the metadata in Stash.
 
-**What stash-janitor does:** Computes an ideal path for every scene using a
+**What custodian does:** Computes an ideal path for every scene using a
 configurable template + Stash metadata. Compares ideal vs actual, then
 proposes moves/renames via Stash's `moveFiles` API.
 
 **Recommended order:** run the other workflows first to maximize metadata:
 ```sh
-stash-janitor orphans scan          # find stash-box matches for orphans
+custodian orphans scan          # find stash-box matches for orphans
 # (link matches in Stash UI via Scene Tagger)
-stash-janitor scenes scan           # find and resolve duplicates
-stash-janitor scenes apply --action merge --commit
-stash-janitor files scan            # clean up multi-file scenes
-stash-janitor files apply --commit
+custodian scenes scan           # find and resolve duplicates
+custodian scenes apply --action merge --commit
+custodian files scan            # clean up multi-file scenes
+custodian files apply --commit
 # NOW organize:
-stash-janitor organize scan
-stash-janitor organize report | less
-stash-janitor organize apply --commit
+custodian organize scan
+custodian organize report | less
+custodian organize apply --commit
 ```
 
 #### Scan
 
 ```sh
-stash-janitor organize scan                    # all scenes (can take a while at 60k)
-stash-janitor organize scan --max-scenes 500   # test with a small sample first
+custodian organize scan                    # all scenes (can take a while at 60k)
+custodian organize scan --max-scenes 500   # test with a small sample first
 ```
 
-For each scene, stash-janitor checks: does the scene have the required metadata
+For each scene, custodian checks: does the scene have the required metadata
 fields (performer + date by default)? If yes, compute the ideal path
 from the template. If no, skip (leave the file where it is).
 
 #### Report
 
 ```sh
-stash-janitor organize report                    # proposed moves + renames (default)
-stash-janitor organize report --filter all       # everything including skips
-stash-janitor organize report --filter conflict  # two scenes → same target path
-stash-janitor organize report --filter skip      # files without enough metadata
+custodian organize report                    # proposed moves + renames (default)
+custodian organize report --filter all       # everything including skips
+custodian organize report --filter conflict  # two scenes → same target path
+custodian organize report --filter skip      # files without enough metadata
 ```
 
 Example output:
@@ -376,9 +376,9 @@ Example output:
 #### Apply
 
 ```sh
-stash-janitor organize apply                     # dry-run preview
-stash-janitor organize apply --commit            # interactive YES → moveFiles via Stash
-stash-janitor organize apply --commit --yes      # scripted
+custodian organize apply                     # dry-run preview
+custodian organize apply --commit            # interactive YES → moveFiles via Stash
+custodian organize apply --commit --yes      # scripted
 ```
 
 #### Templates
@@ -448,7 +448,7 @@ choice.** Before this feature existed, `organize` moved a video through
 `moveFiles`, Stash moved only what it had an ID for, and every subtitle stayed
 behind. The caption silently vanished from the scene.
 
-So stash-janitor moves sidecars itself. This is the **only** part of the tool
+So custodian moves sidecars itself. This is the **only** part of the tool
 that touches the filesystem directly, and it is why the config below exists.
 
 ### What it does
@@ -458,8 +458,8 @@ language suffix:
 
 ```
 tmp2/clip_1080p.mp4      →  Some Performer/2024-01-01_Clip_4k.mp4     (via Stash)
-tmp2/clip_1080p.en.srt   →  Some Performer/2024-01-01_Clip_4k.en.srt  (via stash-janitor)
-tmp2/clip_1080p.es.srt   →  Some Performer/2024-01-01_Clip_4k.es.srt  (via stash-janitor)
+tmp2/clip_1080p.en.srt   →  Some Performer/2024-01-01_Clip_4k.en.srt  (via custodian)
+tmp2/clip_1080p.es.srt   →  Some Performer/2024-01-01_Clip_4k.es.srt  (via custodian)
 ```
 
 Preserving `.en` / `.es` is what keeps multi-language captions working — a bare
@@ -481,9 +481,9 @@ sidecars:
 **`path_map` is the part people get wrong.** Stash reports paths as seen from
 inside its own process — usually `/data/...` in a Docker deployment, which
 often exists nowhere else. You must map that onto something the machine running
-stash-janitor can reach. Longest matching prefix wins.
+custodian can reach. Longest matching prefix wins.
 
-| Where stash-janitor runs | `path_map` |
+| Where custodian runs | `path_map` |
 |---|---|
 | On the NAS itself | `stash: /data` → `local: /share/main/Videos` |
 | Linux box, share mounted | `stash: /data` → `local: /mnt/nas/Videos` |
@@ -496,7 +496,7 @@ are all understood, and prefix matching is case-insensitive for them.
 
 ### When the library isn't mounted
 
-If stash-janitor runs somewhere with no access to the library — a workstation,
+If custodian runs somewhere with no access to the library — a workstation,
 with the files on a NAS — use the SSH backend. It speaks SFTP rather than
 shelling out to `ssh`, which matters for media filenames containing spaces,
 `+`, `(`, `'` and `&`.
@@ -524,7 +524,7 @@ host is always rejected regardless of the setting.
 ### Verify it before relying on it
 
 ```sh
-stash-janitor sidecars check
+custodian sidecars check
 ```
 
 This resolves real scene paths through your `path_map` and reads them back, so
@@ -568,13 +568,13 @@ left behind before sidecar support existed.
 
 ```sh
 # What belongs where? Nothing is moved.
-stash-janitor subs scan --dir /data/webm
+custodian subs scan --dir /data/webm
 
 # Machine-readable too.
-stash-janitor subs scan --dir /data/webm --json report.json
+custodian subs scan --dir /data/webm --json report.json
 
 # Place the confident ones.
-stash-janitor subs apply --dir /data/webm --commit
+custodian subs apply --dir /data/webm --commit
 ```
 
 ### Where the subtitles are
@@ -719,9 +719,9 @@ guessed at, because a wrong caption tag is worse than none.
 For a faster review experience than the CLI report + mark workflow:
 
 ```sh
-stash-janitor review                          # shows decided + needs_review groups
-stash-janitor review --filter all             # shows everything
-stash-janitor review --filter needs-review    # focus on the hard cases
+custodian review                          # shows decided + needs_review groups
+custodian review --filter all             # shows everything
+custodian review --filter needs-review    # focus on the hard cases
 ```
 
 ### Full review-to-delete walkthrough
@@ -730,19 +730,19 @@ This is the complete end-to-end flow including the TUI:
 
 ```sh
 # 1. Scan to find duplicates
-stash-janitor scenes scan
+custodian scenes scan
 
 # 2. Check what you have
-stash-janitor scenes status
+custodian scenes status
 #    decided: N       ← scorer picked a winner, ready to merge/tag
 #    needs_review: M  ← scorer couldn't decide, you must pick
 
 # 3. Auto-decided groups can be applied immediately (no review needed)
-stash-janitor scenes apply --action merge         # preview
-stash-janitor scenes apply --action merge --commit # execute
+custodian scenes apply --action merge         # preview
+custodian scenes apply --action merge --commit # execute
 
 # 4. Review the needs_review groups in the TUI
-stash-janitor review --filter needs-review
+custodian review --filter needs-review
 
 # 5. In the TUI: for each group, press 'o', pick the scene to keep,
 #    press Enter. The status bar updates live.
@@ -750,10 +750,10 @@ stash-janitor review --filter needs-review
 # 6. Quit the TUI (q). It shows next steps.
 
 # 7. Re-scan to convert your decisions into "decided" groups
-stash-janitor scenes scan
+custodian scenes scan
 
 # 8. Now merge the newly-decided groups
-stash-janitor scenes apply --action merge --commit
+custodian scenes apply --action merge --commit
 ```
 
 ### TUI navigation
@@ -802,11 +802,11 @@ The TUI only **saves decisions locally** — it never deletes files or
 touches Stash. The actual deletion happens when you run `apply`:
 
 ```
-TUI decisions → saved to stash-janitor.sqlite
+TUI decisions → saved to custodian.sqlite
                       ↓
-         stash-janitor scenes scan  (re-reads decisions, marks groups decided)
+         custodian scenes scan  (re-reads decisions, marks groups decided)
                       ↓
-         stash-janitor scenes apply --action merge --commit  (executes)
+         custodian scenes apply --action merge --commit  (executes)
 ```
 
 The **status bar** updates live as you make decisions, so you can see
@@ -815,14 +815,14 @@ progress: `decided:5 review:3 dismissed:2`.
 When you **quit**, the TUI prints:
 ```
 Saved 10 decisions. Next steps:
-  1. stash-janitor scenes scan
-  2. stash-janitor scenes status
-  3. stash-janitor scenes apply --action merge --commit
+  1. custodian scenes scan
+  2. custodian scenes status
+  3. custodian scenes apply --action merge --commit
 ```
 
 ## Tips
 
-- **Run `stash-janitor stats` first** to see your library size, metadata coverage,
+- **Run `custodian stats` first** to see your library size, metadata coverage,
   and the state of each workflow's local cache.
 - **Start with `--action tag`** until you trust the scoring. Tags are
   reversible; merge/delete are not.
@@ -833,8 +833,8 @@ Saved 10 decisions. Next steps:
 - **The `--json` flag** on every report/status command makes it easy to
   pipe into `jq` or a script.
 - **Re-scan after changes.** If you delete scenes in Stash's UI, the
-  local cache becomes stale. `stash-janitor stats` will warn; just re-scan.
-- **`stash-janitor.sqlite` is portable.** Copy it to another machine to browse
+  local cache becomes stale. `custodian stats` will warn; just re-scan.
+- **`custodian.sqlite` is portable.** Copy it to another machine to browse
   reports offline.
-- **`stash-janitor scenes mark --group N`** is faster than copying signatures. Use
+- **`custodian scenes mark --group N`** is faster than copying signatures. Use
   the `#N` from the report output directly.

@@ -1,4 +1,4 @@
-// Package confirm provides the interactive YES prompt used by stash-janitor's
+// Package confirm provides the interactive YES prompt used by custodian's
 // destructive --commit actions (scenes apply --action merge, future
 // scenes apply --action delete, files apply --commit).
 //
@@ -97,5 +97,5 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%.2f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
-// HumanBytes is the exported form of humanBytes for use by other stash-janitor packages.
+// HumanBytes is the exported form of humanBytes for use by other custodian packages.
 func HumanBytes(n int64) string { return humanBytes(n) }

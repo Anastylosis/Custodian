@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/pathmap"
-	"github.com/Anastylosis/StashJanitor/internal/sidecar"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/subs"
-	"github.com/Anastylosis/StashJanitor/internal/vfs"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/pathmap"
+	"github.com/Anastylosis/Custodian/internal/sidecar"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/subs"
+	"github.com/Anastylosis/Custodian/internal/vfs"
 	"github.com/spf13/cobra"
 )
 
@@ -347,7 +347,7 @@ func runSubsScan(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Fprintf(out, "\nFull result written to %s\n", flagSubsJSON)
 	}
-	fmt.Fprintln(out, "\nNothing was moved. Use `stash-janitor subs apply --dir ... --commit` to place these.")
+	fmt.Fprintln(out, "\nNothing was moved. Use `custodian subs apply --dir ... --commit` to place these.")
 	return nil
 }
 

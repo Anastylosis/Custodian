@@ -3,7 +3,7 @@ package decide
 import (
 	"testing"
 
-	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/stash"
 )
 
 func TestPickPostMergeKeeperPrefersResolution(t *testing.T) {

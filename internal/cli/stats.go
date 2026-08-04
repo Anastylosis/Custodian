@@ -4,18 +4,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/report"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/report"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 	"github.com/spf13/cobra"
 )
 
 func newStatsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stats",
-		Short: "Show a top-level dashboard of your library and stash-janitor state",
-		Long: `Combines live Stash library numbers with the local stash-janitor cache
+		Short: "Show a top-level dashboard of your library and custodian state",
+		Long: `Combines live Stash library numbers with the local custodian cache
 state into a single 'where am I?' summary. Useful as the first thing
 you run in a new session before deciding which workflow to run next.`,
 		RunE: runStats,
@@ -50,7 +50,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 		metaPct = float64(stats.WithMetadata) / float64(stats.SceneCount) * 100
 	}
 
-	fmt.Fprintf(out, "=== stash-janitor stats ===\n")
+	fmt.Fprintf(out, "=== custodian stats ===\n")
 	fmt.Fprintf(out, "Stash version:     %s\n", ver)
 	fmt.Fprintf(out, "\n")
 	fmt.Fprintf(out, "Library:\n")
@@ -68,7 +68,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 			ss.TotalGroups, ss.Decided, ss.NeedsReview, ss.Applied)
 		fmt.Fprintf(out, "  reclaimable:     %s\n", confirm.HumanBytes(ss.ReclaimableBytes))
 	} else {
-		fmt.Fprintf(out, "  (not scanned yet — run `stash-janitor scenes scan`)\n")
+		fmt.Fprintf(out, "  (not scanned yet — run `custodian scenes scan`)\n")
 	}
 
 	// Workflow B summary.
@@ -79,7 +79,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 			fs.TotalGroups, fs.Decided, fs.NeedsReview, fs.Applied)
 		fmt.Fprintf(out, "  reclaimable:     %s\n", confirm.HumanBytes(fs.ReclaimableBytes))
 	} else {
-		fmt.Fprintf(out, "  (not scanned yet — run `stash-janitor files scan`)\n")
+		fmt.Fprintf(out, "  (not scanned yet — run `custodian files scan`)\n")
 	}
 
 	// Workflow C summary.
@@ -89,16 +89,16 @@ func runStats(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "  looked up:       %d  (matched: %d, no_match: %d, applied: %d)\n",
 			os.TotalLookups, os.Matched, os.NoMatch, os.Applied)
 	} else {
-		fmt.Fprintf(out, "  (not scanned yet — run `stash-janitor orphans scan`)\n")
+		fmt.Fprintf(out, "  (not scanned yet — run `custodian orphans scan`)\n")
 	}
 
 	// Stale-cache check: sample a few cached scene IDs and verify they
 	// still exist in Stash. This catches the case where the user deleted
-	// scenes in Stash's UI but hasn't re-scanned in stash-janitor.
+	// scenes in Stash's UI but hasn't re-scanned in custodian.
 	stale := checkStaleness(ctx, client, st)
 	if stale > 0 {
 		fmt.Fprintf(out, "\n⚠ Cache staleness: %d sampled scene(s) no longer exist in Stash.\n", stale)
-		fmt.Fprintf(out, "  Consider re-scanning: `stash-janitor scenes scan`, `stash-janitor files scan`.\n")
+		fmt.Fprintf(out, "  Consider re-scanning: `custodian scenes scan`, `custodian files scan`.\n")
 	}
 
 	return nil

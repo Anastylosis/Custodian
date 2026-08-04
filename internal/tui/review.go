@@ -1,4 +1,4 @@
-// Package tui implements the `stash-janitor review` interactive terminal UI
+// Package tui implements the `custodian review` interactive terminal UI
 // for walking through duplicate groups and making per-group decisions.
 package tui
 
@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/decide"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/decide"
+	"github.com/Anastylosis/Custodian/internal/store"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Model is the bubbletea model for `stash-janitor review`.
+// Model is the bubbletea model for `custodian review`.
 type Model struct {
 	store  *store.Store
 	scorer *decide.SceneScorer
@@ -249,7 +249,7 @@ func (m Model) View() string {
 		return "" // quit message is printed by the CLI after alt-screen exits
 	}
 	if len(m.groups) == 0 {
-		return "No groups to review. Run `stash-janitor scenes scan` first.\n\nPress q to quit."
+		return "No groups to review. Run `custodian scenes scan` first.\n\nPress q to quit."
 	}
 	switch m.mode {
 	case "detail":
@@ -269,9 +269,9 @@ func (m Model) QuitMessage() string {
 	}
 	return fmt.Sprintf(
 		"\nSaved %d decisions. Next steps:\n"+
-			"  1. stash-janitor scenes scan                              (re-scan to apply your decisions)\n"+
-			"  2. stash-janitor scenes status                            (verify decided/dismissed counts)\n"+
-			"  3. stash-janitor scenes apply --action merge --commit     (execute merges and reclaim disk)\n\n",
+			"  1. custodian scenes scan                              (re-scan to apply your decisions)\n"+
+			"  2. custodian scenes status                            (verify decided/dismissed counts)\n"+
+			"  3. custodian scenes apply --action merge --commit     (execute merges and reclaim disk)\n\n",
 		changes,
 	)
 }
@@ -296,7 +296,7 @@ var (
 func (m Model) viewList() string {
 	var b strings.Builder
 
-	b.WriteString(styleTitle.Render("stash-janitor review — scenes"))
+	b.WriteString(styleTitle.Render("custodian review — scenes"))
 	b.WriteString(fmt.Sprintf("  (%d groups)\n\n", len(m.groups)))
 
 	maxVisible := max(1, m.height-6)

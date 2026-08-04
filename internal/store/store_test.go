@@ -12,7 +12,7 @@ import (
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := Open(filepath.Join(dir, "stash-janitor.sqlite"))
+	s, err := Open(filepath.Join(dir, "custodian.sqlite"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -22,7 +22,7 @@ func newTestStore(t *testing.T) *Store {
 
 func TestOpenAppliesSchemaIdempotently(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "stash-janitor.sqlite")
+	path := filepath.Join(dir, "custodian.sqlite")
 
 	for i := 0; i < 3; i++ {
 		s, err := Open(path)

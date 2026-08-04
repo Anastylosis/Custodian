@@ -8,10 +8,10 @@ import (
 	"log/slog"
 	"path/filepath"
 
-	"github.com/Anastylosis/StashJanitor/internal/confirm"
-	"github.com/Anastylosis/StashJanitor/internal/sidecar"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/sidecar"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
 // ApplyPlan collects the actionable rows for the commit step.
@@ -48,12 +48,12 @@ func PrintApplyPlan(w io.Writer, plan *ApplyPlan, commit bool) error {
 		mode = "COMMIT"
 	}
 	total := len(plan.Moves) + len(plan.Renames)
-	fmt.Fprintf(w, "=== stash-janitor organize apply (%s) ===\n", mode)
+	fmt.Fprintf(w, "=== custodian organize apply (%s) ===\n", mode)
 	fmt.Fprintf(w, "Files to move:    %d\n", len(plan.Moves))
 	fmt.Fprintf(w, "Files to rename:  %d\n", len(plan.Renames))
 	fmt.Fprintf(w, "Total actions:    %d\n", total)
 	if total == 0 {
-		fmt.Fprintln(w, "\nNothing to do. Try `stash-janitor organize scan` first.")
+		fmt.Fprintln(w, "\nNothing to do. Try `custodian organize scan` first.")
 		return nil
 	}
 	if !commit {

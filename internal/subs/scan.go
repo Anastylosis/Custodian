@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Anastylosis/StashJanitor/internal/pathmap"
-	"github.com/Anastylosis/StashJanitor/internal/vfs"
+	"github.com/Anastylosis/Custodian/internal/pathmap"
+	"github.com/Anastylosis/Custodian/internal/vfs"
 )
 
 // DefaultExtensions are the subtitle formats a folder scan collects.

@@ -1,4 +1,4 @@
-// Package merge computes the metadata union stash-janitor passes to Stash's
+// Package merge computes the metadata union custodian passes to Stash's
 // sceneMerge mutation.
 //
 // Stash's sceneMerge does NOT auto-union scene-level metadata in v0.31.0
@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/stash"
 )
 
 // FieldDiff is a single field that the union changed on the keeper. Used

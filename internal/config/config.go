@@ -1,8 +1,8 @@
-// Package config defines the on-disk YAML schema for stash-janitor and the loader
+// Package config defines the on-disk YAML schema for custodian and the loader
 // that resolves it.
 //
 // The defaults live in default.yaml (embedded into the binary) and are also
-// what `stash-janitor config init` writes to disk. Loading user config is implemented
+// what `custodian config init` writes to disk. Loading user config is implemented
 // as: parse defaults, then unmarshal the user file on top of the same struct.
 // yaml.v3 merges struct fields key-by-key, so any field the user omits keeps
 // its default. Slices and maps are replaced wholesale by user values, which
@@ -22,7 +22,7 @@ import (
 var defaultYAML []byte
 
 // DefaultYAML returns the embedded default config as raw bytes. Used by
-// `stash-janitor config init` so the comments are preserved verbatim.
+// `custodian config init` so the comments are preserved verbatim.
 func DefaultYAML() []byte {
 	out := make([]byte, len(defaultYAML))
 	copy(out, defaultYAML)
@@ -47,7 +47,7 @@ type Config struct {
 // else sharing a video's stem) travel with the video when organize moves or
 // renames it.
 //
-// This is the one part of stash-janitor that touches the filesystem directly.
+// This is the one part of custodian that touches the filesystem directly.
 // It has to: Stash does not index subtitles as files, so they have no file ID
 // and its moveFiles mutation cannot move them. See MANUAL.md, "Sidecar files".
 type SidecarsConfig struct {
@@ -61,7 +61,7 @@ type SidecarsConfig struct {
 	Access string `yaml:"access"`
 
 	// PathMap translates the paths Stash reports into paths reachable from
-	// wherever stash-janitor runs. Required whenever those differ — which is
+	// wherever custodian runs. Required whenever those differ — which is
 	// most Docker deployments, where Stash reports /data.
 	PathMap []PathMapRule `yaml:"path_map"`
 
@@ -184,7 +184,7 @@ type PostMergeFileCleanup struct {
 // Load reads the user's config file (if it exists) and merges it on top of
 // the embedded defaults. A missing file is NOT an error — the embedded
 // defaults are returned as-is, so first-time users can run sub-commands
-// before they bother with `stash-janitor config init`.
+// before they bother with `custodian config init`.
 func Load(path string) (*Config, error) {
 	cfg := &Config{}
 	if err := yaml.Unmarshal(defaultYAML, cfg); err != nil {
@@ -262,7 +262,7 @@ func WriteDefault(path string) error {
 }
 
 // MarshalYAML serializes the loaded config back to YAML for display via
-// `stash-janitor config show`. This deliberately does NOT preserve comments — it's
+// `custodian config show`. This deliberately does NOT preserve comments — it's
 // the *effective* config after merging defaults and user overrides.
 func MarshalYAML(c *Config) ([]byte, error) {
 	return yaml.Marshal(c)

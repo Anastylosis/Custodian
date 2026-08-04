@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"path/filepath"
 
-	"github.com/Anastylosis/StashJanitor/internal/config"
-	"github.com/Anastylosis/StashJanitor/internal/stash"
-	"github.com/Anastylosis/StashJanitor/internal/store"
+	"github.com/Anastylosis/Custodian/internal/config"
+	"github.com/Anastylosis/Custodian/internal/stash"
+	"github.com/Anastylosis/Custodian/internal/store"
 )
 
-// ScanOptions configures one invocation of `stash-janitor organize scan`.
+// ScanOptions configures one invocation of `custodian organize scan`.
 type ScanOptions struct {
 	PerPage   int
 	MaxScenes int
