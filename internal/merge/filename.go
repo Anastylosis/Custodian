@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Wasylq/StashJanitor/internal/stash"
+	"github.com/Anastylosis/StashJanitor/internal/stash"
 )
 
 // defaultFilenameMetadataPattern matches the user's convention:

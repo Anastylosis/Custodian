@@ -110,7 +110,7 @@ See [MANUAL.md](MANUAL.md) for usage instructions and
 
 **Option A: Download a release binary** (no Go required)
 
-Go to the [Releases](https://github.com/Wasylq/StashJanitor/releases)
+Go to the [Releases](https://github.com/Anastylosis/StashJanitor/releases)
 page, download the archive for your platform, and extract:
 
 ```sh
@@ -128,7 +128,7 @@ chmod +x stash-janitor
 **Option B: Build from source** (requires Go 1.22+)
 
 ```sh
-git clone https://github.com/Wasylq/StashJanitor.git
+git clone https://github.com/Anastylosis/StashJanitor.git
 cd StashJanitor
 go build -o stash-janitor ./cmd/stash-janitor
 ```
@@ -136,7 +136,7 @@ go build -o stash-janitor ./cmd/stash-janitor
 **Option C: `go install`**
 
 ```sh
-go install github.com/Wasylq/StashJanitor/cmd/stash-janitor@latest
+go install github.com/Anastylosis/StashJanitor/cmd/stash-janitor@latest
 ```
 
 The binary is fully self-contained (pure-Go SQLite, no cgo, no runtime deps).

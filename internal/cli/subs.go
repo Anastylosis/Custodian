@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wasylq/StashJanitor/internal/config"
-	"github.com/Wasylq/StashJanitor/internal/confirm"
-	"github.com/Wasylq/StashJanitor/internal/pathmap"
-	"github.com/Wasylq/StashJanitor/internal/sidecar"
-	"github.com/Wasylq/StashJanitor/internal/stash"
-	"github.com/Wasylq/StashJanitor/internal/subs"
-	"github.com/Wasylq/StashJanitor/internal/vfs"
+	"github.com/Anastylosis/StashJanitor/internal/config"
+	"github.com/Anastylosis/StashJanitor/internal/confirm"
+	"github.com/Anastylosis/StashJanitor/internal/pathmap"
+	"github.com/Anastylosis/StashJanitor/internal/sidecar"
+	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/StashJanitor/internal/subs"
+	"github.com/Anastylosis/StashJanitor/internal/vfs"
 	"github.com/spf13/cobra"
 )
 

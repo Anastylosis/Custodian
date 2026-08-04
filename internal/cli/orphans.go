@@ -6,10 +6,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/Wasylq/StashJanitor/internal/apply"
-	"github.com/Wasylq/StashJanitor/internal/confirm"
-	"github.com/Wasylq/StashJanitor/internal/report"
-	"github.com/Wasylq/StashJanitor/internal/scan"
+	"github.com/Anastylosis/StashJanitor/internal/apply"
+	"github.com/Anastylosis/StashJanitor/internal/confirm"
+	"github.com/Anastylosis/StashJanitor/internal/report"
+	"github.com/Anastylosis/StashJanitor/internal/scan"
 	"github.com/spf13/cobra"
 )
 

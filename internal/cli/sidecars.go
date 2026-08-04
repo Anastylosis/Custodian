@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Wasylq/StashJanitor/internal/pathmap"
-	"github.com/Wasylq/StashJanitor/internal/sidecar"
-	"github.com/Wasylq/StashJanitor/internal/stash"
+	"github.com/Anastylosis/StashJanitor/internal/pathmap"
+	"github.com/Anastylosis/StashJanitor/internal/sidecar"
+	"github.com/Anastylosis/StashJanitor/internal/stash"
 	"github.com/spf13/cobra"
 )
 

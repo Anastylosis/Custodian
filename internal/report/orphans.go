@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 // OrphansStatus is the workflow C summary of orphan-lookup state.

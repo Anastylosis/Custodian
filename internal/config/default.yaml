@@ -6,7 +6,7 @@
 # Every key below is the default value. Delete a line to revert to its
 # default. Add or change only what you need.
 #
-# Full documentation: https://github.com/Wasylq/StashJanitor/blob/main/MANUAL.md
+# Full documentation: https://github.com/Anastylosis/StashJanitor/blob/main/MANUAL.md
 
 stash:
   url: http://localhost:9999

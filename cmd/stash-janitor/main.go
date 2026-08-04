@@ -7,7 +7,7 @@ package main
 import (
 	"os"
 
-	"github.com/Wasylq/StashJanitor/internal/cli"
+	"github.com/Anastylosis/StashJanitor/internal/cli"
 )
 
 // Set at build time via -ldflags:

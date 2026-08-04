@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Wasylq/StashJanitor/internal/confirm"
-	"github.com/Wasylq/StashJanitor/internal/organize"
-	"github.com/Wasylq/StashJanitor/internal/sidecar"
+	"github.com/Anastylosis/StashJanitor/internal/confirm"
+	"github.com/Anastylosis/StashJanitor/internal/organize"
+	"github.com/Anastylosis/StashJanitor/internal/sidecar"
 	"github.com/spf13/cobra"
 )
 

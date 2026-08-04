@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Wasylq/StashJanitor/internal/apply"
-	"github.com/Wasylq/StashJanitor/internal/confirm"
-	"github.com/Wasylq/StashJanitor/internal/decide"
-	"github.com/Wasylq/StashJanitor/internal/report"
-	"github.com/Wasylq/StashJanitor/internal/scan"
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/apply"
+	"github.com/Anastylosis/StashJanitor/internal/confirm"
+	"github.com/Anastylosis/StashJanitor/internal/decide"
+	"github.com/Anastylosis/StashJanitor/internal/report"
+	"github.com/Anastylosis/StashJanitor/internal/scan"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 	"github.com/spf13/cobra"
 )
 

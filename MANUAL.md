@@ -3,19 +3,19 @@
 ## Install
 
 **Download a release binary** from the
-[Releases](https://github.com/Wasylq/StashJanitor/releases) page — no
+[Releases](https://github.com/Anastylosis/StashJanitor/releases) page — no
 Go toolchain required. Extract and you're ready.
 
 Or build from source:
 ```sh
-git clone https://github.com/Wasylq/StashJanitor.git
+git clone https://github.com/Anastylosis/StashJanitor.git
 cd StashJanitor
 go build -o stash-janitor ./cmd/stash-janitor
 ```
 
 Or via `go install`:
 ```sh
-go install github.com/Wasylq/StashJanitor/cmd/stash-janitor@latest
+go install github.com/Anastylosis/StashJanitor/cmd/stash-janitor@latest
 ```
 
 The binary is fully self-contained (pure-Go SQLite, no cgo, no runtime deps).

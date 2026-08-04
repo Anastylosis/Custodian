@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Wasylq/StashJanitor/internal/config"
+	"github.com/Anastylosis/StashJanitor/internal/config"
 	"github.com/spf13/cobra"
 )
 

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Wasylq/StashJanitor/internal/pathmap"
+	"github.com/Anastylosis/StashJanitor/internal/pathmap"
 )
 
 // Mem is an in-memory FS used by tests. It keeps the sidecar move logic

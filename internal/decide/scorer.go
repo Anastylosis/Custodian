@@ -16,9 +16,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Wasylq/StashJanitor/internal/config"
-	"github.com/Wasylq/StashJanitor/internal/confirm"
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/config"
+	"github.com/Anastylosis/StashJanitor/internal/confirm"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 // Decision is the outcome of scoring a duplicate group.

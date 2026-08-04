@@ -129,5 +129,5 @@ jobs:
 
             Or build from source:
             ```sh
-            go install github.com/Wasylq/StashJanitor/cmd/stash-janitor@${{ github.ref_name }}
+            go install github.com/Anastylosis/StashJanitor/cmd/stash-janitor@${{ github.ref_name }}
             ```

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 func newTestStore(t *testing.T) *store.Store {

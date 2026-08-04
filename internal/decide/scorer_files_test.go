@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wasylq/StashJanitor/internal/config"
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/config"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 func defaultFileScorer(t *testing.T) *FileScorer {

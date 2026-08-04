@@ -7,8 +7,8 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/Wasylq/StashJanitor/internal/stash"
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 // FingerprintReport summarizes a SubmitFingerprints run for the cli to print.

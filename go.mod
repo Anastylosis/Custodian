@@ -1,4 +1,4 @@
-module github.com/Wasylq/StashJanitor
+module github.com/Anastylosis/StashJanitor
 
 go 1.25.0
 

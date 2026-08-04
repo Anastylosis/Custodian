@@ -7,9 +7,9 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/Wasylq/StashJanitor/internal/confirm"
-	"github.com/Wasylq/StashJanitor/internal/stash"
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/confirm"
+	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 // OrphansPlan is the precomputed work for `stash-janitor orphans apply`.

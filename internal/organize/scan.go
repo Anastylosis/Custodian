@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"path/filepath"
 
-	"github.com/Wasylq/StashJanitor/internal/config"
-	"github.com/Wasylq/StashJanitor/internal/stash"
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/config"
+	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 // ScanOptions configures one invocation of `stash-janitor organize scan`.

@@ -7,12 +7,12 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/Wasylq/StashJanitor/internal/config"
-	"github.com/Wasylq/StashJanitor/internal/confirm"
-	"github.com/Wasylq/StashJanitor/internal/decide"
-	"github.com/Wasylq/StashJanitor/internal/merge"
-	"github.com/Wasylq/StashJanitor/internal/stash"
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/config"
+	"github.com/Anastylosis/StashJanitor/internal/confirm"
+	"github.com/Anastylosis/StashJanitor/internal/decide"
+	"github.com/Anastylosis/StashJanitor/internal/merge"
+	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 // MergePlan is the precomputed work for `stash-janitor scenes apply --action merge`.

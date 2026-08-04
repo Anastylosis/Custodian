@@ -3,8 +3,8 @@ package merge
 import (
 	"testing"
 
-	"github.com/Wasylq/StashJanitor/internal/config"
-	"github.com/Wasylq/StashJanitor/internal/stash"
+	"github.com/Anastylosis/StashJanitor/internal/config"
+	"github.com/Anastylosis/StashJanitor/internal/stash"
 )
 
 func defaults(t *testing.T) *config.Config {

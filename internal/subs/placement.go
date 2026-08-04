@@ -3,8 +3,8 @@ package subs
 import (
 	"strings"
 
-	"github.com/Wasylq/StashJanitor/internal/pathmap"
-	"github.com/Wasylq/StashJanitor/internal/sidecar"
+	"github.com/Anastylosis/StashJanitor/internal/pathmap"
+	"github.com/Anastylosis/StashJanitor/internal/sidecar"
 )
 
 // Placement is one subtitle about to be moved next to its matched video.

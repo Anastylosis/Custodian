@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Wasylq/StashJanitor/internal/config"
-	"github.com/Wasylq/StashJanitor/internal/stash"
+	"github.com/Anastylosis/StashJanitor/internal/config"
+	"github.com/Anastylosis/StashJanitor/internal/stash"
 )
 
 // FieldDiff is a single field that the union changed on the keeper. Used

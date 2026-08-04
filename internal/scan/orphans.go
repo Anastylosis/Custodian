@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wasylq/StashJanitor/internal/stash"
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/stash"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 // OrphansOptions configures one invocation of `stash-janitor orphans scan`.

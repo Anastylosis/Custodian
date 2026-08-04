@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wasylq/StashJanitor/internal/confirm"
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/confirm"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 // FilesStatus is the workflow B equivalent of ScenesStatus.

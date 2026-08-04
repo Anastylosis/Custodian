@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wasylq/StashJanitor/internal/store"
+	"github.com/Anastylosis/StashJanitor/internal/store"
 )
 
 func TestPlanMergeCountsLosersAndBytes(t *testing.T) {
