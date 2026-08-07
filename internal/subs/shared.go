@@ -1,7 +1,7 @@
 package subs
 
-// The matcher itself now lives in github.com/Anastylosis/subs, shared with
-// MoanSubs — the two repos had grown byte-identical copies of it. What stays
+// The matcher itself now lives in github.com/Anastylosis/subtitlematch, shared
+// with MoanSubs — the two repos had grown byte-identical copies of it. What stays
 // here is the part that is genuinely Custodian's: walking a local library
 // (scan.go), deciding where a subtitle file should land (placement.go), and
 // rendering the outcome (report.go).
@@ -11,7 +11,7 @@ package subs
 // — `subs.Match` and `submatch.Match` are the same type, not convertible
 // lookalikes, so values cross the boundary freely.
 
-import submatch "github.com/Anastylosis/subs"
+import submatch "github.com/Anastylosis/subtitlematch"
 
 // Core matcher types.
 type (

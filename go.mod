@@ -3,7 +3,7 @@ module github.com/Anastylosis/Custodian
 go 1.25.0
 
 require (
-	github.com/Anastylosis/subs v0.1.0
+	github.com/Anastylosis/subtitlematch v0.1.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/pkg/sftp v1.13.11
