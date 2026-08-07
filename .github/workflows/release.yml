@@ -1,10 +1,5 @@
 name: Release
 
-# Actions are pinned to exact versions, not moving major tags. A major tag
-# like @v7 advances whenever v7.x ships, so an unrelated commit can turn CI
-# red — which is exactly how `version: latest` silently moved this repo's
-# linter from v1 to v2. Dependabot proposes bumps; they land deliberately.
-
 on:
   push:
     tags:
@@ -15,119 +10,38 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # No nfpm, aur or docker: Custodian ships binaries only — it has no
+  # Dockerfile and no packaging/ directory.
   release:
-    name: Build and Release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          fetch-depth: 0
+    uses: Anastylosis/.github/.github/workflows/go-release.yml@v1
+    permissions:
+      contents: write
+      discussions: write
+      id-token: write
+      attestations: write
+    secrets: inherit
+    with:
+      binary-name: custodian
+      main-package: ./cmd/custodian
+      install-instructions: |
+        Download the binary for your platform, extract, and run:
 
-      - name: Set up Go
-        uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: go.mod
+        ```sh
+        # Linux (amd64)
+        tar xzf custodian-${{ github.ref_name }}-linux-amd64.tar.gz
+        chmod +x custodian
+        ./custodian config init
 
-      - name: Run tests
-        run: go test -race -count=1 ./...
+        # macOS (Apple Silicon)
+        tar xzf custodian-${{ github.ref_name }}-darwin-arm64.tar.gz
+        chmod +x custodian
+        ./custodian config init
+        ```
 
-      - name: Build binaries
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
-          COMMIT="${GITHUB_SHA::8}"
-          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
-          mkdir -p dist
-
-          platforms=(
-            "linux/amd64"
-            "linux/arm64"
-            "darwin/amd64"
-            "darwin/arm64"
-            "windows/amd64"
-          )
-
-          for platform in "${platforms[@]}"; do
-            GOOS="${platform%/*}"
-            GOARCH="${platform#*/}"
-            binary="custodian"
-            archive="custodian-${VERSION}-${GOOS}-${GOARCH}"
-
-            if [ "$GOOS" = "windows" ]; then
-              binary="custodian.exe"
-            fi
-
-            echo "Building ${GOOS}/${GOARCH}..."
-            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "$LDFLAGS" -o "dist/${binary}" ./cmd/custodian
-
-            # Package as tar.gz (or zip for Windows)
-            cd dist
-            if [ "$GOOS" = "windows" ]; then
-              zip "${archive}.zip" "${binary}"
-            else
-              tar czf "${archive}.tar.gz" "${binary}"
-            fi
-            rm "${binary}"
-            cd ..
-          done
-
-      - name: Generate SHA256SUMS
-        run: |
-          cd dist
-          # Capture the checksums BEFORE creating the file: the shell opens a
-          # redirect target before expanding the glob, so `* > SHA256SUMS`
-          # would hash an empty SHA256SUMS into its own listing. Sorted so the
-          # file is stable and diffable between releases.
-          sums=$(sha256sum -- *)
-          echo "$sums" | LC_ALL=C sort -k2 > SHA256SUMS
-          cat SHA256SUMS
-          # Every line must verify before it is published.
-          sha256sum --check --strict SHA256SUMS
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          # Get commits since last tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -z "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --oneline --no-merges)
-          else
-            CHANGELOG=$(git log --oneline --no-merges "${PREV_TAG}..HEAD")
-          fi
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3.0.2
-        with:
-          files: dist/*
-          generate_release_notes: true
-          body: |
-            ## Changes
-
-            ${{ steps.changelog.outputs.changelog }}
-
-            ## Installation
-
-            Download the binary for your platform, extract, and run:
-
-            ```sh
-            # Linux (amd64)
-            tar xzf custodian-${{ github.ref_name }}-linux-amd64.tar.gz
-            chmod +x custodian
-            ./custodian config init
-
-            # macOS (Apple Silicon)
-            tar xzf custodian-${{ github.ref_name }}-darwin-arm64.tar.gz
-            chmod +x custodian
-            ./custodian config init
-            ```
-
-            Or build from source:
-            ```sh
-            go install github.com/Anastylosis/Custodian/cmd/custodian@${{ github.ref_name }}
-            ```
+        Or build from source:
+        ```sh
+        go install github.com/Anastylosis/Custodian/cmd/custodian@${{ github.ref_name }}
+        ```

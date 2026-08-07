@@ -1,15 +1,11 @@
 name: CI
 
-# Actions are pinned to exact versions, not moving major tags. A major tag
-# like @v7 advances whenever v7.x ships, so an unrelated commit can turn CI
-# red — which is exactly how `version: latest` silently moved this repo's
-# linter from v1 to v2. Dependabot proposes bumps; they land deliberately.
-
 on:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -19,99 +15,27 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
+  ci:
+    uses: Anastylosis/.github/.github/workflows/go-ci.yml@v1
+    permissions:
+      contents: read
+      checks: write
+      # Codecov uploads authenticate with an OIDC token. A reusable workflow
+      # cannot grant itself more than the caller holds, so it has to be here.
+      id-token: write
+    secrets: inherit
+    with:
+      binary-name: custodian
+      main-package: ./cmd/custodian
 
-      - name: Set up Go
-        uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Build
-        run: go build ./...
-
-      - name: Test
-        run: go test -race -count=1 ./...
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Run go vet
-        run: go vet ./...
-
-      - name: Run golangci-lint
-        # Pinned rather than `latest`: a new release adding a check turns CI
-        # red on an unrelated commit, and `latest` already jumped this repo
-        # from v1 to v2 silently. Bump deliberately, alongside .golangci.yml.
-        uses: golangci/golangci-lint-action@v9.3.0
-        with:
-          version: v2.11.4
-          args: --timeout=5m
-
-  # Informational, never gating. The Go vulnerability database reports findings
-  # against Go *toolchains* as well as dependencies, so failing on any finding
-  # would mean bumping go.mod on every Go point release just to stay green.
-  vulncheck:
-    name: Vulncheck (informational)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
-
-      - name: Run govulncheck
-        run: govulncheck ./... || echo "::warning::govulncheck found vulnerabilities (see above)"
-
-  # linux/amd64 is deliberately absent: the test job runs on ubuntu-latest and
-  # already does `go build ./...` natively. This matrix exists to catch
-  # cross-compilation breakage for the other platforms release.yml ships.
-  build-check:
-    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-          - goos: windows
-            goarch: amd64
-    steps:
-      - uses: actions/checkout@v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: |
-          binary="custodian"
-          if [ "$GOOS" = "windows" ]; then binary="custodian.exe"; fi
-          go build -o "$binary" ./cmd/custodian
+# What Custodian gains by adopting: gotestsum + JUnit + Codecov upload, the
+# coverage step summary, and a cross-build matrix — none of which its hand-
+# written ci.yml had. It keeps the exact action pinning it already insisted
+# on, which is now the shared policy.
+#
+# Custodian has no Dockerfile, so check-dockerfile-go-version stays off and
+# there is no docker workflow to adopt.
+#
+# Its internal/stash/integration_test.go carries no build tag, so it runs in
+# the normal suite. If that ever starts hitting a live Stash, gate it behind
+# //go:build integration and flip vet-integration-tag on.
