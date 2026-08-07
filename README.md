@@ -1,5 +1,9 @@
 # Custodian
 
+[![CI](https://github.com/Anastylosis/Custodian/actions/workflows/ci.yml/badge.svg)](https://github.com/Anastylosis/Custodian/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Anastylosis/Custodian/branch/master/graph/badge.svg)](https://codecov.io/gh/Anastylosis/Custodian)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Anastylosis/Custodian)](https://goreportcard.com/report/github.com/Anastylosis/Custodian)
+
 *(formerly StashJanitor)*
 
 A small CLI for finding and resolving duplicate video scenes in a
