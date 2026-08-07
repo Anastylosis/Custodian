@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // DefaultConfigPath returns the path to use when --config is not specified.
@@ -46,7 +47,31 @@ func DefaultDBPath() string {
 		}
 	}
 
+	// Anyone who ran an older build with XDG_CONFIG_HOME set has a database
+	// under the *config* root, because dataHome() used to fall through to it.
+	// Adopt that file rather than silently starting an empty database beside
+	// it — the scan history and decisions in there are not reproducible.
+	if legacy := legacyDBPath(); legacy != "" {
+		if _, err := os.Stat(legacy); err == nil {
+			return legacy
+		}
+	}
+
 	return "custodian.sqlite"
+}
+
+// legacyDBPath is where a database landed while dataHome() was misdetecting
+// the platform. Empty when that location coincides with the correct one, so
+// this only ever names a genuinely different path.
+func legacyDBPath() string {
+	cfg, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	if cfg == dataHome() {
+		return ""
+	}
+	return filepath.Join(cfg, "custodian", "custodian.sqlite")
 }
 
 // DefaultConfigInitPath returns the path `config init` should write to.
@@ -69,33 +94,40 @@ func DefaultDBInitPath() string {
 
 // dataHome returns the platform-appropriate directory for user data:
 //
-//	Linux:   $XDG_DATA_HOME or ~/.local/share
-//	macOS:   ~/Library/Application Support  (same as UserConfigDir)
-//	Windows: %AppData%                      (same as UserConfigDir)
+//	Linux/BSD: $XDG_DATA_HOME, else ~/.local/share
+//	macOS:     ~/Library/Application Support  (same root as config)
+//	Windows:   %AppData%                      (same root as config)
 //
-// On macOS/Windows there's no separate "data" vs "config" dir, so we
-// use the same root as config (with a separate subfolder).
+// Only the freedesktop platforms separate data from config, so elsewhere this
+// shares the config root and relies on the "custodian" subdirectory to keep
+// the two apart.
+//
+// The platform is decided by runtime.GOOS rather than inferred. An earlier
+// version compared os.UserConfigDir() against ~/.config and treated a
+// mismatch as "not Linux" — which is exactly what setting XDG_CONFIG_HOME
+// produces, so the database landed in the *config* directory instead of
+// ~/.local/share. Nothing failed; the file simply appeared somewhere the user
+// had not asked for.
 func dataHome() string {
-	// Linux: respect XDG_DATA_HOME.
 	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
 		return d
 	}
 
-	// On macOS and Windows, UserConfigDir is already the right place
-	// for both config and data. On Linux, it returns ~/.config which
-	// is NOT where data should go — we want ~/.local/share.
-	if dir, err := os.UserConfigDir(); err == nil {
-		home, _ := os.UserHomeDir()
-		linuxConfigDir := filepath.Join(home, ".config")
-		if dir == linuxConfigDir {
-			// Linux: use ~/.local/share instead of ~/.config.
-			return filepath.Join(home, ".local", "share")
+	switch runtime.GOOS {
+	case "windows", "darwin":
+		// No separate data root on these platforms.
+		if dir, err := os.UserConfigDir(); err == nil {
+			return dir
 		}
-		// macOS / Windows: config dir works for data too.
-		return dir
+		return ""
+	default:
+		// freedesktop: data belongs in ~/.local/share, never ~/.config.
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		return filepath.Join(home, ".local", "share")
 	}
-
-	return ""
 }
 
 // EnsureDir creates dir and all parents if they don't exist.
