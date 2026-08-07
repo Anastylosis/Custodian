@@ -92,8 +92,8 @@ func TestExecuteHTTPError(t *testing.T) {
 	if !errors.As(err, &httpErr) {
 		t.Fatalf("expected *HTTPError, got %T: %v", err, err)
 	}
-	if httpErr.Status != 500 {
-		t.Errorf("Status = %d, want 500", httpErr.Status)
+	if httpErr.StatusCode != 500 {
+		t.Errorf("StatusCode = %d, want 500", httpErr.StatusCode)
 	}
 	if !strings.Contains(httpErr.Body, "internal server error") {
 		t.Errorf("body = %q, expected to contain 'internal server error'", httpErr.Body)
