@@ -113,10 +113,9 @@ func BuildUnion(keeper *stash.Scene, losers []*stash.Scene, cfg *config.Config) 
 		for _, sid := range keeper.StashIDs {
 			seen[sid.Endpoint+"|"+sid.ID] = true
 		}
-		var newStashIDs []stash.StashIDInput
-		for _, sid := range keeper.StashIDs {
-			newStashIDs = append(newStashIDs, sid)
-		}
+		// Copied, not aliased: the losers' IDs are appended below, and that
+		// must not write into the keeper's slice.
+		newStashIDs := append([]stash.StashIDInput(nil), keeper.StashIDs...)
 		var added []string
 		for _, l := range losers {
 			for _, sid := range l.StashIDs {
