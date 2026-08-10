@@ -278,7 +278,7 @@ func sceneSnapshot(s *stash.Scene, scorer *decide.SceneScorer) store.SceneGroupS
 	if pf := s.PrimaryFile(); pf != nil {
 		out.Width = pf.Width
 		out.Height = pf.Height
-		out.Bitrate = pf.BitRate
+		out.Bitrate = int(pf.BitRate)
 		out.Framerate = pf.FrameRate
 		out.Codec = strings.ToLower(pf.VideoCodec)
 		out.FileSize = pf.Size

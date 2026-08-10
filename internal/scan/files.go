@@ -229,7 +229,7 @@ func fileSnapshot(f *stash.VideoFile, scorer *decide.FileScorer, isPrimary bool)
 		FilenameQuality: scorer.ClassifyFilename(f.Basename),
 		Width:           f.Width,
 		Height:          f.Height,
-		Bitrate:         f.BitRate,
+		Bitrate:         int(f.BitRate),
 		Framerate:       f.FrameRate,
 		Codec:           strings.ToLower(f.VideoCodec),
 		FileSize:        f.Size,

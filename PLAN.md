@@ -155,7 +155,7 @@ StashJanitor/
 │   ├── stash/                   # GraphQL client
 │   │   ├── client.go            # http transport, optional ApiKey header, error handling
 │   │   ├── queries.go           # findDuplicateScenes, findScene, tag ops, mutations
-│   │   └── types.go             # Scene, VideoFile, DuplicateGroup
+│   │   └── types.go             # inputs + aliases to the shared scene types
 │   ├── store/                   # SQLite persistence
 │   │   ├── store.go             # CRUD
 │   │   ├── schema.sql           # embedded via //go:embed

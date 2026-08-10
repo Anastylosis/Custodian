@@ -49,7 +49,7 @@ func makeScene(id string, hasStashID bool, width, height, bitrate int, codec str
 			Size:       size,
 			Width:      width,
 			Height:     height,
-			BitRate:    bitrate,
+			BitRate:    int64(bitrate),
 			VideoCodec: codec,
 		}},
 	}
@@ -57,7 +57,7 @@ func makeScene(id string, hasStashID bool, width, height, bitrate int, codec str
 		sc.Tags = append(sc.Tags, stash.Tag{ID: "t", Name: "t"})
 	}
 	if hasStashID {
-		sc.StashIDs = []stash.StashID{{Endpoint: "https://stashdb.org", StashID: "abc"}}
+		sc.StashIDs = []stash.StashID{{Endpoint: "https://stashdb.org", ID: "abc"}}
 	}
 	return sc
 }

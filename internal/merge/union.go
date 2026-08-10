@@ -111,21 +111,21 @@ func BuildUnion(keeper *stash.Scene, losers []*stash.Scene, cfg *config.Config) 
 		// Build a key set first to deduplicate.
 		seen := map[string]bool{}
 		for _, sid := range keeper.StashIDs {
-			seen[sid.Endpoint+"|"+sid.StashID] = true
+			seen[sid.Endpoint+"|"+sid.ID] = true
 		}
 		var newStashIDs []stash.StashIDInput
 		for _, sid := range keeper.StashIDs {
-			newStashIDs = append(newStashIDs, stash.StashIDInput(sid))
+			newStashIDs = append(newStashIDs, sid)
 		}
 		var added []string
 		for _, l := range losers {
 			for _, sid := range l.StashIDs {
-				key := sid.Endpoint + "|" + sid.StashID
+				key := sid.Endpoint + "|" + sid.ID
 				if seen[key] {
 					continue
 				}
 				seen[key] = true
-				newStashIDs = append(newStashIDs, stash.StashIDInput(sid))
+				newStashIDs = append(newStashIDs, sid)
 				added = append(added, key)
 			}
 		}

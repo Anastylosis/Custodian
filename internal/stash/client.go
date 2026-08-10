@@ -1,10 +1,10 @@
 // Package stash talks to a Stash instance's GraphQL API.
 //
-// The transport — auth, size limits, typed errors, API-key redaction — lives
-// in github.com/Anastylosis/stash-go, shared with the other projects here.
-// What stays is the query catalogue in queries.go, which is genuinely
-// Custodian's: findDuplicateScenes, sceneMerge, moveFiles and the rest exist
-// for deduplication and have no counterpart in the other consumers.
+// The transport, the scene types and the scene selection set live in
+// github.com/Anastylosis/stash-go, shared with the other projects here. What
+// stays is the query catalogue in queries.go, which is genuinely Custodian's:
+// findDuplicateScenes, sceneMerge, moveFiles and the rest exist for
+// deduplication and have no counterpart in the other consumers.
 package stash
 
 import (

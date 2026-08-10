@@ -393,7 +393,7 @@ Module layout:
 cmd/custodian/main.go        — entry point
 internal/cli/          — cobra command tree (scenes, files, orphans, stats, config)
 internal/config/       — YAML loader (embedded defaults)
-internal/stash/        — GraphQL client + query catalog (v0.31.0)
+internal/stash/        — dedup query catalog over the shared stash-go client
 internal/store/        — SQLite persistence (schema v4 with migrations)
 internal/scan/         — workflow A/B/C scan orchestration
 internal/decide/       — scene + file scoring engines

@@ -160,13 +160,13 @@ func TestBuildUnionStashIDsCombinedNoDup(t *testing.T) {
 	cfg := defaults(t)
 	keeper := &stash.Scene{
 		ID:       "K",
-		StashIDs: []stash.StashID{{Endpoint: "https://stashdb.org", StashID: "abc"}},
+		StashIDs: []stash.StashID{{Endpoint: "https://stashdb.org", ID: "abc"}},
 	}
 	loser := &stash.Scene{
 		ID: "L",
 		StashIDs: []stash.StashID{
-			{Endpoint: "https://stashdb.org", StashID: "abc"}, // dup
-			{Endpoint: "https://fansdb.cc", StashID: "xyz"},
+			{Endpoint: "https://stashdb.org", ID: "abc"}, // dup
+			{Endpoint: "https://fansdb.cc", ID: "xyz"},
 		},
 	}
 	res, err := BuildUnion(keeper, []*stash.Scene{loser}, cfg)

@@ -4,46 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	upstream "github.com/Anastylosis/stash-go"
 )
 
-// sceneFieldsFragment is the GraphQL fragment we attach to every scene we
-// fetch. Keeping it in one place means adding a field is a single-line edit
-// rather than tracking it across multiple query strings.
+// sceneFieldsFragment is attached to every scene query here. The field list is
+// the shared client's, so what these queries request and what [Scene] decodes
+// cannot drift apart.
 const sceneFieldsFragment = `
-fragment SceneFields on Scene {
-  id
-  title
-  code
-  details
-  director
-  urls
-  date
-  rating100
-  organized
-  o_counter
-  play_count
-  studio { id name }
-  tags { id name }
-  performers { id name }
-  stash_ids { endpoint stash_id }
-  galleries { id }
-  groups { group { id } scene_index }
-  files {
-    id
-    path
-    basename
-    size
-    mod_time
-    format
-    width
-    height
-    duration
-    video_codec
-    audio_codec
-    frame_rate
-    bit_rate
-    fingerprints { type value }
-  }
+fragment SceneFields on Scene {` + upstream.SceneFields + `
 }
 `
 
@@ -87,25 +56,17 @@ func (c *Client) FindDuplicateScenes(ctx context.Context, distance int, duration
 // Single scene by ID — used by both workflows when full detail is needed
 // ============================================================================
 
-const findSceneQuery = sceneFieldsFragment + `
-query FindScene($id: ID!) {
-  findScene(id: $id) {
-    ...SceneFields
-  }
-}
-`
-
-// FindScene fetches one scene by ID with full metadata. Returns nil if the
-// scene does not exist (Stash returns null data, not an error).
+// FindScene fetches one scene by ID. Returns nil if the scene does not exist
+// (Stash answers with null data, not an error).
 func (c *Client) FindScene(ctx context.Context, id string) (*Scene, error) {
-	var resp struct {
-		FindScene *Scene `json:"findScene"`
-	}
-	vars := map[string]any{"id": id}
-	if err := c.Execute(ctx, findSceneQuery, vars, &resp); err != nil {
+	scene, found, err := c.up.FindScene(ctx, id)
+	if err != nil {
 		return nil, fmt.Errorf("findScene(%s): %w", id, err)
 	}
-	return resp.FindScene, nil
+	if !found {
+		return nil, nil
+	}
+	return scene, nil
 }
 
 // ============================================================================
@@ -154,55 +115,18 @@ func (c *Client) FindMultiFileScenesPage(ctx context.Context, page, perPage int)
 // Tag find-or-create — used by `custodian scenes apply --action tag`
 // ============================================================================
 
-const findTagByNameQuery = `
-query FindTagByName($name: String!) {
-  findTags(
-    tag_filter: { name: { value: $name, modifier: EQUALS } }
-    filter: { per_page: 1 }
-  ) {
-    count
-    tags { id name }
-  }
-}
-`
-
-const tagCreateMutation = `
-mutation TagCreate($name: String!) {
-  tagCreate(input: { name: $name }) {
-    id
-    name
-  }
-}
-`
-
-// FindOrCreateTag returns a tag with the given name, creating it if it
-// doesn't exist yet. Idempotent — safe to call repeatedly. Used to materialize
-// the _dedupe_loser / _dedupe_keeper tags on first apply.
+// FindOrCreateTag returns a tag with the given name, creating it if it does
+// not exist. Idempotent — safe to call repeatedly. Used to materialize the
+// _dedupe_loser / _dedupe_keeper tags on first apply.
+//
+// The shared client checks aliases before creating, so a tag that already
+// exists under a name Custodian does not know is reused rather than duplicated.
 func (c *Client) FindOrCreateTag(ctx context.Context, name string) (*Tag, error) {
-	var find struct {
-		FindTags FindTagsResult `json:"findTags"`
+	id, err := c.up.EnsureTag(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("ensureTag(%q): %w", name, err)
 	}
-	if err := c.Execute(ctx, findTagByNameQuery, map[string]any{"name": name}, &find); err != nil {
-		return nil, fmt.Errorf("findTagByName(%q): %w", name, err)
-	}
-	for i := range find.FindTags.Tags {
-		// Stash's name filter is contains-by-default, so we have to do a
-		// strict equality check ourselves to avoid matching a substring tag.
-		if find.FindTags.Tags[i].Name == name {
-			return &find.FindTags.Tags[i], nil
-		}
-	}
-
-	var create struct {
-		TagCreate Tag `json:"tagCreate"`
-	}
-	if err := c.Execute(ctx, tagCreateMutation, map[string]any{"name": name}, &create); err != nil {
-		return nil, fmt.Errorf("tagCreate(%q): %w", name, err)
-	}
-	if create.TagCreate.ID == "" {
-		return nil, fmt.Errorf("tagCreate(%q): empty response", name)
-	}
-	return &create.TagCreate, nil
+	return &Tag{ID: id, Name: name}, nil
 }
 
 // ============================================================================
@@ -290,13 +214,9 @@ type SceneUpdateVals struct {
 	StashIDs     []StashIDInput `json:"stash_ids,omitempty"`
 }
 
-// StashIDInput mirrors Stash's StashIDInput shape (used by sceneUpdate and
-// sceneMerge). Identical to StashID but with a separate type to avoid
-// implying we ever read it from Stash.
-type StashIDInput struct {
-	Endpoint string `json:"endpoint"`
-	StashID  string `json:"stash_id"`
-}
+// StashIDInput is what sceneUpdate and sceneMerge take. Stash's input and
+// output shapes for a stash-box ID are the same, so this is the read type.
+type StashIDInput = StashID
 
 const sceneMergeMutation = `
 mutation SceneMerge($input: SceneMergeInput!) {

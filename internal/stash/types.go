@@ -1,130 +1,35 @@
 package stash
 
-// Types in this file mirror the subset of Stash's GraphQL schema that custodian
-// actually consumes. They are intentionally NOT a complete schema clone —
-// adding a new field is cheap and explicit, but carrying the entire surface
-// area would couple us to schema churn we don't care about.
-//
-// JSON tags match Stash's field names (snake_case). Field names are Go
-// idiomatic (CamelCase).
+import upstream "github.com/Anastylosis/stash-go"
 
-// Scene is a Stash scene with the fields custodian needs across both workflows.
-type Scene struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Code      string   `json:"code"`
-	Details   string   `json:"details"`
-	Director  string   `json:"director"`
-	URLs      []string `json:"urls"`
-	Date      string   `json:"date"`
-	Rating100 *int     `json:"rating100"`
-	Organized bool     `json:"organized"`
-	OCounter  int      `json:"o_counter"`
-	PlayCount *int     `json:"play_count"`
-
-	Studio     *Studio      `json:"studio"`
-	Tags       []Tag        `json:"tags"`
-	Performers []Performer  `json:"performers"`
-	StashIDs   []StashID    `json:"stash_ids"`
-	Galleries  []Gallery    `json:"galleries"`
-	Groups     []SceneGroup `json:"groups"`
-
-	Files []VideoFile `json:"files"`
-}
-
-// PrimaryFile returns the first file in the scene's files list, which Stash
-// treats as the canonical/primary file. Returns nil if the scene has no
-// files (shouldn't happen in practice but defensively handled).
-func (s *Scene) PrimaryFile() *VideoFile {
-	if len(s.Files) == 0 {
-		return nil
-	}
-	return &s.Files[0]
-}
-
-// HasStashID reports whether the scene has at least one stash-box ID
-// attached. Used by the scoring engine.
-func (s *Scene) HasStashID() bool {
-	return len(s.StashIDs) > 0
-}
-
-// VideoFile is a Stash video file (subset of the VideoFile GraphQL type).
-type VideoFile struct {
-	ID         string  `json:"id"`
-	Path       string  `json:"path"`
-	Basename   string  `json:"basename"`
-	Size       int64   `json:"size"`
-	ModTime    string  `json:"mod_time"`
-	Format     string  `json:"format"`
-	Width      int     `json:"width"`
-	Height     int     `json:"height"`
-	Duration   float64 `json:"duration"`
-	VideoCodec string  `json:"video_codec"`
-	AudioCodec string  `json:"audio_codec"`
-	FrameRate  float64 `json:"frame_rate"`
-	BitRate    int     `json:"bit_rate"`
-
-	Fingerprints []Fingerprint `json:"fingerprints"`
-}
-
-// Fingerprint is a single content hash for a file.
-type Fingerprint struct {
-	Type  string `json:"type"` // oshash, md5, phash
-	Value string `json:"value"`
-}
-
-// Tag is a Stash tag (id+name only — custodian doesn't need anything else).
-type Tag struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// Performer is a Stash performer (id+name only).
-type Performer struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// Studio is a Stash studio (id+name only).
-type Studio struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// StashID associates a scene with an entry in a stash-box endpoint.
-type StashID struct {
-	Endpoint string `json:"endpoint"`
-	StashID  string `json:"stash_id"`
-}
-
-// Gallery is a referenced gallery (id only — used for the merge union).
-type Gallery struct {
-	ID string `json:"id"`
-}
-
-// SceneGroup is the join between a scene and a Group (formerly Movie),
-// holding the scene's index within the group.
-type SceneGroup struct {
-	Group      Group `json:"group"`
-	SceneIndex *int  `json:"scene_index"`
-}
-
-// Group is a Stash group / movie (id only).
-type Group struct {
-	ID string `json:"id"`
-}
+// The scene types are the shared client's — one definition, decoded from one
+// selection set (upstream.SceneFields), which the queries in queries.go paste
+// into their own GraphQL. Custodian's own input and result shapes follow.
+type (
+	// Scene is a Stash scene with its files, tags, performers, studio,
+	// stash-box IDs and galleries.
+	Scene = upstream.Scene
+	// VideoFile is one video file backing a scene, with its fingerprints.
+	VideoFile = upstream.File
+	// Fingerprint is a single content hash for a file (oshash, md5, phash).
+	Fingerprint = upstream.Fingerprint
+	// Tag is a Stash tag.
+	Tag = upstream.Tag
+	// Performer is a Stash performer.
+	Performer = upstream.Performer
+	// Studio is a Stash studio.
+	Studio = upstream.Studio
+	// StashID associates a scene with an entry in a stash-box endpoint.
+	StashID = upstream.StashID
+	// Gallery is a gallery attached to a scene, used for the merge union.
+	Gallery = upstream.Gallery
+)
 
 // FindScenesResult is the return type of findScenes, used for paginated
 // enumeration in workflow B.
 type FindScenesResult struct {
 	Count  int     `json:"count"`
 	Scenes []Scene `json:"scenes"`
-}
-
-// FindTagsResult is the return type of findTags.
-type FindTagsResult struct {
-	Count int   `json:"count"`
-	Tags  []Tag `json:"tags"`
 }
 
 // StashBoxConfig is one entry from configuration.general.stashBoxes —

@@ -238,7 +238,7 @@ func (s *FileScorer) comparePostMerge(a, b *stash.VideoFile) int {
 	if c := cmpInt(a.Width*a.Height, b.Width*b.Height); c != 0 {
 		return c
 	}
-	if c := cmpInt(a.BitRate, b.BitRate); c != 0 {
+	if c := cmpInt64(a.BitRate, b.BitRate); c != 0 {
 		return c
 	}
 	if c := cmpInt(s.ClassifyFilename(a.Basename), s.ClassifyFilename(b.Basename)); c != 0 {
