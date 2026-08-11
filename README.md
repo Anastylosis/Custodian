@@ -464,3 +464,9 @@ See [MANUAL.md](MANUAL.md) for the full review-to-delete walkthrough.
   field documented inline
 - `./custodian help` — cobra-generated command tree
 - `./custodian scenes help`, `./custodian files help`, `./custodian orphans help` — workflow-specific help
+
+## License
+
+Copyright (C) 2026 Wasylq
+
+[GPL-3.0-only](LICENSE).
