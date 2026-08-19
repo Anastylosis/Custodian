@@ -831,7 +831,10 @@ Saved 10 decisions. Next steps:
 - **Pipe reports through `less -S`** to avoid line wrapping on narrow
   terminals.
 - **The `--json` flag** on every report/status command makes it easy to
-  pipe into `jq` or a script.
+  pipe into `jq` or a script. On `subs scan`, each candidate also carries the
+  scene's stem, date, studio and performers, and each match carries the
+  subtitle's stem and folder path — enough to replay the matcher's decisions
+  elsewhere (subtitlematch's regression corpus does exactly this).
 - **Re-scan after changes.** If you delete scenes in Stash's UI, the
   local cache becomes stale. `custodian stats` will warn; just re-scan.
 - **`custodian.sqlite` is portable.** Copy it to another machine to browse

@@ -100,22 +100,34 @@ func PrintReport(w io.Writer, matches []Match, sum Summary, maxCandidates int) e
 }
 
 // jsonMatch is the machine-readable shape written by --json.
+//
+// No subtitle-side date field: the vendored subtitlematch is v0.1.0, whose
+// Subtitle has no Date (that landed in v0.2.0 alongside the "date mismatch"
+// reason). Bumping the module is out of scope here; a scene-side date is
+// still carried on each jsonCandidate below, since SceneRef has always had
+// one.
 type jsonMatch struct {
 	Subtitle string          `json:"subtitle"`
+	Stem     string          `json:"stem"`
 	Runtime  string          `json:"runtime"`
 	Lang     string          `json:"lang"`
+	Dirs     []string        `json:"dirs,omitempty"`
 	Verdict  string          `json:"verdict"`
 	Cands    []jsonCandidate `json:"candidates"`
 }
 
 type jsonCandidate struct {
-	SceneID  string   `json:"scene_id"`
-	Score    float64  `json:"score"`
-	Path     string   `json:"path"`
-	Title    string   `json:"title"`
-	Duration string   `json:"duration"`
-	DeltaSec int      `json:"delta_seconds"`
-	Reasons  []string `json:"reasons"`
+	SceneID    string   `json:"scene_id"`
+	Score      float64  `json:"score"`
+	Path       string   `json:"path"`
+	Stem       string   `json:"stem"`
+	Title      string   `json:"title"`
+	Date       string   `json:"date,omitempty"`
+	Studio     string   `json:"studio,omitempty"`
+	Performers []string `json:"performers,omitempty"`
+	Duration   string   `json:"duration"`
+	DeltaSec   int      `json:"delta_seconds"`
+	Reasons    []string `json:"reasons"`
 }
 
 // WriteJSON emits the full result for scripting or later review.
@@ -128,19 +140,25 @@ func WriteJSON(w io.Writer, matches []Match, sum Summary) error {
 	for _, m := range matches {
 		jm := jsonMatch{
 			Subtitle: m.Subtitle.Path,
+			Stem:     m.Subtitle.Stem,
 			Runtime:  HMS(m.Subtitle.Runtime),
 			Lang:     m.Subtitle.Lang,
+			Dirs:     m.Subtitle.Dirs,
 			Verdict:  string(m.Verdict),
 		}
 		for _, c := range m.Candidates {
 			jm.Cands = append(jm.Cands, jsonCandidate{
-				SceneID:  c.Scene.ID,
-				Score:    float64(int(c.Score*10)) / 10,
-				Path:     c.Scene.Path,
-				Title:    c.Scene.Title,
-				Duration: HMS(c.Scene.Duration),
-				DeltaSec: int(c.Delta.Seconds()),
-				Reasons:  c.Reasons,
+				SceneID:    c.Scene.ID,
+				Score:      float64(int(c.Score*10)) / 10,
+				Path:       c.Scene.Path,
+				Stem:       c.Scene.Stem,
+				Title:      c.Scene.Title,
+				Date:       c.Scene.Date,
+				Studio:     c.Scene.Studio,
+				Performers: c.Scene.Performers,
+				Duration:   HMS(c.Scene.Duration),
+				DeltaSec:   int(c.Delta.Seconds()),
+				Reasons:    c.Reasons,
 			})
 		}
 		out.Matches = append(out.Matches, jm)
