@@ -85,9 +85,11 @@ func (s *Store) ListFileGroups(ctx context.Context, statuses []string) ([]*FileG
 	query := `SELECT id, scan_run_id, scene_id, status,
 	                  COALESCE(decision_reason,''), decided_at, applied_at
 	          FROM file_groups`
-	args := []any{}
+	pred, arg := latestRunScope(WorkflowFiles)
+	query += ` WHERE ` + pred
+	args := []any{arg}
 	if len(statuses) > 0 {
-		query += ` WHERE status IN (`
+		query += ` AND status IN (`
 		for i, st := range statuses {
 			if i > 0 {
 				query += `,`

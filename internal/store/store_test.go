@@ -412,3 +412,84 @@ func TestLatestScanRun(t *testing.T) {
 		t.Error("FinishedAt should be set after FinishScanRun")
 	}
 }
+
+// A second scan of an unchanged library re-inserts every group under a new
+// scan_run_id. List* must return only the newest run's rows: stacking runs
+// double-counts reports and makes apply act twice on the same group, the
+// second pass hitting scenes the first already deleted.
+func TestListScopesToLatestScanRun(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	upsert := func(runID int64, status string) {
+		t.Helper()
+		g := &SceneGroup{
+			ScanRunID: runID,
+			Signature: "42|17",
+			Status:    status,
+			Scenes: []SceneGroupScene{
+				{SceneID: "42", Role: RoleKeeper},
+				{SceneID: "17", Role: RoleLoser},
+			},
+		}
+		if err := s.UpsertSceneGroup(ctx, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run1, _ := s.StartScanRun(ctx, WorkflowScenes, nil, nil)
+	upsert(run1, StatusDecided)
+
+	run2, _ := s.StartScanRun(ctx, WorkflowScenes, nil, nil)
+	upsert(run2, StatusDecided)
+
+	groups, err := s.ListSceneGroups(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("len(groups) = %d after two scans of the same group, want 1", len(groups))
+	}
+	if groups[0].ScanRunID != run2 {
+		t.Errorf("scan_run_id = %d, want the latest run %d", groups[0].ScanRunID, run2)
+	}
+
+	// The status filter must compose with the run scope, not replace it.
+	decided, err := s.ListSceneGroups(ctx, []string{StatusDecided})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decided) != 1 {
+		t.Fatalf("len(decided) = %d, want 1", len(decided))
+	}
+	if len(decided[0].Scenes) != 2 {
+		t.Errorf("len(scenes) = %d, want 2", len(decided[0].Scenes))
+	}
+
+	// Another workflow's runs must not shadow this one's latest.
+	if _, err := s.StartScanRun(ctx, WorkflowFiles, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	groups, err = s.ListSceneGroups(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].ScanRunID != run2 {
+		t.Errorf("a files scan changed the scenes listing: got %d group(s) from run %v",
+			len(groups), groups)
+	}
+}
+
+// Never-scanned workflows must list nothing rather than everything.
+func TestListEmptyWhenWorkflowNeverScanned(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	groups, err := s.ListSceneGroups(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 0 {
+		t.Errorf("len(groups) = %d before any scan, want 0", len(groups))
+	}
+}

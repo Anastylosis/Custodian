@@ -48,9 +48,11 @@ func (s *Store) ListOrganizePlans(ctx context.Context, statuses []string) ([]*Or
 	query := `SELECT id, scan_run_id, scene_id, file_id, current_path, target_path,
 	                  status, COALESCE(reason,''), applied_at
 	          FROM organize_plans`
-	args := []any{}
+	pred, arg := latestRunScope(WorkflowOrganize)
+	query += ` WHERE ` + pred
+	args := []any{arg}
 	if len(statuses) > 0 {
-		query += ` WHERE status IN (`
+		query += ` AND status IN (`
 		for i, st := range statuses {
 			if i > 0 {
 				query += `,`

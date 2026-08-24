@@ -118,9 +118,11 @@ func (s *Store) ListSceneGroups(ctx context.Context, statuses []string) ([]*Scen
 	query := `SELECT id, scan_run_id, signature, status,
 	                  COALESCE(decision_reason, ''), decided_at, applied_at
 	          FROM scene_groups`
-	args := []any{}
+	pred, arg := latestRunScope(WorkflowScenes)
+	query += ` WHERE ` + pred
+	args := []any{arg}
 	if len(statuses) > 0 {
-		query += ` WHERE status IN (`
+		query += ` AND status IN (`
 		for i, st := range statuses {
 			if i > 0 {
 				query += `,`

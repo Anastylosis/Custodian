@@ -88,9 +88,11 @@ func (s *Store) ListOrphanLookups(ctx context.Context, statuses []string) ([]*Or
 	                  COALESCE(match_studio,''), COALESCE(match_date,''),
 	                  COALESCE(match_performers,''), match_count
 	          FROM orphan_lookups`
-	args := []any{}
+	pred, arg := latestRunScope(WorkflowOrphans)
+	query += ` WHERE ` + pred
+	args := []any{arg}
 	if len(statuses) > 0 {
-		query += ` WHERE status IN (`
+		query += ` AND status IN (`
 		for i, st := range statuses {
 			if i > 0 {
 				query += `,`

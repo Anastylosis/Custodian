@@ -282,3 +282,19 @@ func scanTime(ns sql.NullString) *time.Time {
 
 // ErrNotFound is returned by Get* methods when no row matches.
 var ErrNotFound = errors.New("store: not found")
+
+// latestRunScope returns a SQL predicate restricting rows to the most recent
+// scan run for the given workflow, along with its bind argument.
+//
+// Every scan run inserts a fresh row per group — the UNIQUE keys are
+// (scan_run_id, signature), (scan_run_id, scene_id) and so on — so listing
+// without this scope stacks every historical run's rows on top of each other.
+// That double-counts reports and, worse, makes apply process each group once
+// per run: the second pass acts on scenes the first pass already deleted.
+//
+// The subquery yields no rows when the workflow has never been scanned, which
+// correctly lists nothing rather than everything.
+func latestRunScope(workflow string) (string, any) {
+	return `scan_run_id = (SELECT id FROM scan_runs WHERE workflow = ?
+	                       ORDER BY id DESC LIMIT 1)`, workflow
+}
