@@ -32,60 +32,17 @@ type FindScenesResult struct {
 	Scenes []Scene `json:"scenes"`
 }
 
-// StashBoxConfig is one entry from configuration.general.stashBoxes —
-// the list of stash-box endpoints the user has configured in Stash.
-type StashBoxConfig struct {
-	Endpoint string `json:"endpoint"`
-	Name     string `json:"name"`
-}
+// StashBoxConfig is one stash-box endpoint the user has configured in Stash.
+type StashBoxConfig = upstream.StashBox
 
-// ScrapedScene mirrors Stash's ScrapedScene type, the result of a
-// scrapeMultiScenes / scrapeSingleScene call. We only carry the fields the
-// orphans report needs.
-type ScrapedScene struct {
-	RemoteSiteID string             `json:"remote_site_id"`
-	Title        string             `json:"title"`
-	Date         string             `json:"date"`
-	URLs         []string           `json:"urls"`
-	Studio       *ScrapedStudio     `json:"studio"`
-	Performers   []ScrapedPerformer `json:"performers"`
-}
-
-// ScrapedStudio is the studio sub-object on a ScrapedScene.
-type ScrapedStudio struct {
-	Name         string `json:"name"`
-	RemoteSiteID string `json:"remote_site_id"`
-}
-
-// ScrapedPerformer is one entry in ScrapedScene.Performers.
-type ScrapedPerformer struct {
-	Name         string `json:"name"`
-	RemoteSiteID string `json:"remote_site_id"`
-}
-
-// CriterionModifier mirrors the GraphQL enum used in scene filters.
-type CriterionModifier string
-
-const (
-	ModifierEquals      CriterionModifier = "EQUALS"
-	ModifierNotEquals   CriterionModifier = "NOT_EQUALS"
-	ModifierGreaterThan CriterionModifier = "GREATER_THAN"
-	ModifierLessThan    CriterionModifier = "LESS_THAN"
+// The scraped shapes are the shared client's. Custodian reads a handful of
+// fields off them — the remote id, title, date, studio and performers — and
+// the shared type carries those plus the ones other consumers need.
+type (
+	// ScrapedScene is one candidate a stash-box returned for a scene.
+	ScrapedScene = upstream.ScrapedScene
+	// ScrapedStudio is the studio sub-object on a ScrapedScene.
+	ScrapedStudio = upstream.ScrapedStudio
+	// ScrapedPerformer is one entry in ScrapedScene.Performers.
+	ScrapedPerformer = upstream.ScrapedPerformer
 )
-
-// BulkUpdateIDMode mirrors the GraphQL enum for bulk-update ID semantics.
-type BulkUpdateIDMode string
-
-const (
-	BulkUpdateAdd    BulkUpdateIDMode = "ADD"
-	BulkUpdateRemove BulkUpdateIDMode = "REMOVE"
-	BulkUpdateSet    BulkUpdateIDMode = "SET"
-)
-
-// BulkUpdateIDs is the input shape for bulkSceneUpdate's tag_ids/etc fields.
-// We always use Mode=ADD when tagging dedup losers/keepers so we don't
-// accidentally drop existing tags.
-type BulkUpdateIDs struct {
-	IDs  []string         `json:"ids"`
-	Mode BulkUpdateIDMode `json:"mode"`
-}

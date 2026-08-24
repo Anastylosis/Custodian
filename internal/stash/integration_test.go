@@ -111,3 +111,130 @@ func TestIntegrationFindScene(t *testing.T) {
 		t.Logf("scene 1 primary file: %s (%d bytes, %dx%d, %s)", f.Basename, f.Size, f.Width, f.Height, f.VideoCodec)
 	}
 }
+
+// The orphan filter changed shape when this moved onto the shared client:
+// Custodian asked for stash_id_count == 0, the shared filter asks whether a
+// stash_id_endpoint is null. They agree on this library, and this is what
+// says so if that ever stops being true.
+func TestIntegrationOrphanCountAgreesWithStats(t *testing.T) {
+	c := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	stats, err := c.LibraryStats(ctx)
+	if err != nil {
+		t.Fatalf("LibraryStats: %v", err)
+	}
+	orphans, err := c.FindOrphanScenesPage(ctx, 1, 1)
+	if err != nil {
+		t.Fatalf("FindOrphanScenesPage: %v", err)
+	}
+	if stats.SceneCount == 0 {
+		t.Skip("empty library")
+	}
+	// Every scene either carries a stash id or does not.
+	if orphans.Count+stats.WithMetadata != stats.SceneCount {
+		t.Errorf("orphans(%d) + with-metadata(%d) = %d, want the library total %d",
+			orphans.Count, stats.WithMetadata, orphans.Count+stats.WithMetadata, stats.SceneCount)
+	}
+	for _, s := range orphans.Scenes {
+		if len(s.StashIDs) != 0 {
+			t.Errorf("scene %s came back as an orphan with %d stash id(s)", s.ID, len(s.StashIDs))
+		}
+	}
+	t.Logf("%d orphans, %d with metadata, %d total",
+		orphans.Count, stats.WithMetadata, stats.SceneCount)
+}
+
+func TestIntegrationFindAllScenesPaginates(t *testing.T) {
+	c := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	first, err := c.FindAllScenesPage(ctx, 1, 5)
+	if err != nil {
+		t.Fatalf("FindAllScenesPage(1): %v", err)
+	}
+	if first.Count == 0 {
+		t.Skip("empty library")
+	}
+	if len(first.Scenes) == 0 {
+		t.Fatal("page 1 of a non-empty library returned no scenes")
+	}
+	second, err := c.FindAllScenesPage(ctx, 2, 5)
+	if err != nil {
+		t.Fatalf("FindAllScenesPage(2): %v", err)
+	}
+	if second.Count != first.Count {
+		t.Errorf("total changed between pages: %d then %d", first.Count, second.Count)
+	}
+	// Paging has to be stable, or a whole-library walk sees some scenes twice
+	// and misses others.
+	seen := map[string]bool{}
+	for _, s := range first.Scenes {
+		seen[s.ID] = true
+	}
+	for _, s := range second.Scenes {
+		if seen[s.ID] {
+			t.Errorf("scene %s appeared on both page 1 and page 2", s.ID)
+		}
+	}
+}
+
+func TestIntegrationLibraryStats(t *testing.T) {
+	c := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	stats, err := c.LibraryStats(ctx)
+	if err != nil {
+		t.Fatalf("LibraryStats: %v", err)
+	}
+	if stats.SceneCount == 0 {
+		t.Skip("empty library")
+	}
+	// Size arrives as bytes and is divided down here; a library of this size
+	// reading as zero GiB would mean the conversion or the decode is wrong.
+	if stats.ScenesSizeGB <= 0 || stats.ScenesDuration <= 0 {
+		t.Errorf("size = %v GiB, duration = %v s", stats.ScenesSizeGB, stats.ScenesDuration)
+	}
+	t.Logf("%d scenes, %.1f GiB, %.0f hours, %d with metadata",
+		stats.SceneCount, stats.ScenesSizeGB, stats.ScenesDuration/3600, stats.WithMetadata)
+}
+
+func TestIntegrationCreatorNames(t *testing.T) {
+	c := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	names, err := c.CreatorNames(ctx)
+	if err != nil {
+		t.Fatalf("CreatorNames: %v", err)
+	}
+	if len(names) == 0 {
+		t.Skip("no performers or studios")
+	}
+	for _, n := range names {
+		if n == "" {
+			t.Fatal("an empty name reached the vocabulary — it would match everything")
+		}
+	}
+	t.Logf("%d performer and studio names (with aliases)", len(names))
+}
+
+func TestIntegrationStashBoxes(t *testing.T) {
+	c := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	boxes, err := c.StashBoxes(ctx)
+	if err != nil {
+		t.Fatalf("StashBoxes: %v", err)
+	}
+	for _, b := range boxes {
+		if b.Endpoint == "" {
+			t.Errorf("configured stash-box %q has no endpoint", b.Name)
+		}
+	}
+	t.Logf("%d stash-box endpoint(s) configured", len(boxes))
+}

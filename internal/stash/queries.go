@@ -8,60 +8,36 @@ import (
 	upstream "github.com/Anastylosis/stash-go"
 )
 
-// sceneFieldsFragment is attached to every scene query here. The field list is
-// the shared client's, so what these queries request and what [Scene] decodes
-// cannot drift apart.
-const sceneFieldsFragment = `
-fragment SceneFields on Scene {` + upstream.SceneFields + `
-}
-`
-
-// ============================================================================
-// Workflow A: cross-scene queries
-// ============================================================================
-
-const findDuplicateScenesQuery = sceneFieldsFragment + `
-query FindDuplicateScenes($distance: Int, $duration_diff: Float) {
-  findDuplicateScenes(distance: $distance, duration_diff: $duration_diff) {
-    ...SceneFields
-  }
-}
-`
-
-// FindDuplicateScenes returns groups of perceptually-duplicate scenes from
-// Stash, computed server-side via findDuplicateScenes. distance is the phash
-// hamming distance threshold (0 = identical, 4 = re-encodes, >8 risky).
-// durationDiff is the maximum duration delta in seconds for two scenes to
-// be considered the same content.
+// This file is an adapter, not a client. Every call below is the shared
+// client's, named and shaped the way Custodian's workflows talk about them —
+// "the losers", "one page of orphans", "the primary file" — so the workflow
+// code reads in its own vocabulary while the GraphQL, the retries and the
+// error types stay in one place, shared with the other consumers.
 //
-// The result is a slice of groups, each group a slice of two or more scenes.
-// At your library scale (~60k scenes) this can be a multi-MB response — see
-// PLAN.md section 11 for the streaming-decode mitigation that scan/scenes.go
-// will eventually implement on top of this.
-func (c *Client) FindDuplicateScenes(ctx context.Context, distance int, durationDiff float64) ([][]Scene, error) {
-	var resp struct {
-		FindDuplicateScenes [][]Scene `json:"findDuplicateScenes"`
-	}
-	vars := map[string]any{
-		"distance":      distance,
-		"duration_diff": durationDiff,
-	}
-	if err := c.Execute(ctx, findDuplicateScenesQuery, vars, &resp); err != nil {
-		return nil, fmt.Errorf("findDuplicateScenes: %w", err)
-	}
-	return resp.FindDuplicateScenes, nil
-}
+// A call earns a wrapper here when Custodian's question is narrower than the
+// API's: a filter it always passes the same way, a return shape its callers
+// want, an argument it must never get wrong.
 
 // ============================================================================
-// Single scene by ID — used by both workflows when full detail is needed
+// Workflow A: cross-scene duplicates
 // ============================================================================
+
+// FindDuplicateScenes returns groups of perceptually-duplicate scenes.
+// distance is the phash hamming distance (0 = identical, 4 = re-encodes,
+// >8 risky); durationDiff is the maximum runtime delta in seconds.
+//
+// At this library's scale (~60k scenes) the response is multi-MB — see
+// PLAN.md section 11 for the streaming-decode mitigation.
+func (c *Client) FindDuplicateScenes(ctx context.Context, distance int, durationDiff float64) ([][]Scene, error) {
+	return c.up.FindDuplicateScenes(ctx, distance, durationDiff)
+}
 
 // FindScene fetches one scene by ID. Returns nil if the scene does not exist
 // (Stash answers with null data, not an error).
 func (c *Client) FindScene(ctx context.Context, id string) (*Scene, error) {
 	scene, found, err := c.up.FindScene(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("findScene(%s): %w", id, err)
+		return nil, err
 	}
 	if !found {
 		return nil, nil
@@ -70,24 +46,12 @@ func (c *Client) FindScene(ctx context.Context, id string) (*Scene, error) {
 }
 
 // ============================================================================
-// Workflow B: multi-file scene enumeration
+// Workflow B: scenes carrying more than one file
 // ============================================================================
 
-const findMultiFileScenesQuery = sceneFieldsFragment + `
-query FindMultiFileScenes($page: Int!, $per_page: Int!) {
-  findScenes(
-    filter: { page: $page, per_page: $per_page, sort: "id", direction: ASC }
-    scene_filter: { file_count: { modifier: GREATER_THAN, value: 1 } }
-  ) {
-    count
-    scenes { ...SceneFields }
-  }
-}
-`
-
-// FindMultiFileScenesPage returns one page of scenes that have more than
-// one file attached. The total result count is exposed in
-// FindScenesResult.Count so callers can drive their own pagination loop.
+// FindMultiFileScenesPage returns one page of scenes that have more than one
+// file attached. The total is in FindScenesResult.Count so callers can drive
+// their own pagination loop.
 //
 // page is 1-indexed (Stash convention). perPage is capped server-side; 100
 // is a sensible default.
@@ -98,17 +62,8 @@ func (c *Client) FindMultiFileScenesPage(ctx context.Context, page, perPage int)
 	if perPage < 1 {
 		return nil, errors.New("findMultiFileScenes: perPage must be >= 1")
 	}
-	var resp struct {
-		FindScenes FindScenesResult `json:"findScenes"`
-	}
-	vars := map[string]any{
-		"page":     page,
-		"per_page": perPage,
-	}
-	if err := c.Execute(ctx, findMultiFileScenesQuery, vars, &resp); err != nil {
-		return nil, fmt.Errorf("findMultiFileScenes(page=%d): %w", page, err)
-	}
-	return &resp.FindScenes, nil
+	multiFile := true
+	return c.scenePage(ctx, upstream.SceneFilter{MultiFile: &multiFile}, page, perPage, "findMultiFileScenes")
 }
 
 // ============================================================================
@@ -129,55 +84,23 @@ func (c *Client) FindOrCreateTag(ctx context.Context, name string) (*Tag, error)
 	return &Tag{ID: id, Name: name}, nil
 }
 
-// ============================================================================
-// bulkSceneUpdate — used to add tags to many scenes at once
-// ============================================================================
-
-const bulkSceneUpdateMutation = `
-mutation BulkSceneUpdate($ids: [ID!]!, $tag_ids: BulkUpdateIds!) {
-  bulkSceneUpdate(input: { ids: $ids, tag_ids: $tag_ids }) {
-    id
-  }
-}
-`
-
-// BulkAddTag adds a single tag to many scenes in one call. Mode is always
-// ADD so existing tags on the scenes are preserved.
+// BulkAddTag adds a single tag to many scenes in one call. Additive: the
+// scenes' existing tags are preserved.
 func (c *Client) BulkAddTag(ctx context.Context, sceneIDs []string, tagID string) error {
 	if len(sceneIDs) == 0 {
 		return nil
 	}
-	vars := map[string]any{
-		"ids": sceneIDs,
-		"tag_ids": BulkUpdateIDs{
-			IDs:  []string{tagID},
-			Mode: BulkUpdateAdd,
-		},
-	}
-	return c.Execute(ctx, bulkSceneUpdateMutation, vars, nil)
+	return c.up.AddSceneTags(ctx, []string{tagID}, sceneIDs...)
 }
 
 // ============================================================================
-// sceneUpdate — used by workflow B to swap the primary file
+// Primary file — workflow B, and workflow A's post-merge cleanup
 // ============================================================================
 
-const sceneUpdatePrimaryFileMutation = `
-mutation SceneUpdatePrimaryFile($id: ID!, $primary_file_id: ID!) {
-  sceneUpdate(input: { id: $id, primary_file_id: $primary_file_id }) {
-    id
-  }
-}
-`
-
-// SetPrimaryFile changes which file is the primary for a scene. Used by
-// workflow B (and the post-merge cleanup of workflow A) to promote the
-// best file before deleting the others.
+// SetPrimaryFile promotes a file to be the scene's primary one, before the
+// others are deleted. The file must already belong to the scene.
 func (c *Client) SetPrimaryFile(ctx context.Context, sceneID, fileID string) error {
-	vars := map[string]any{
-		"id":              sceneID,
-		"primary_file_id": fileID,
-	}
-	return c.Execute(ctx, sceneUpdatePrimaryFileMutation, vars, nil)
+	return c.up.SetPrimaryFile(ctx, sceneID, fileID)
 }
 
 // ============================================================================
@@ -188,47 +111,67 @@ func (c *Client) SetPrimaryFile(ctx context.Context, sceneID, fileID string) err
 // metadata union, NOT the raw loser values — Stash does not auto-union
 // metadata, so the caller must compute it. See merge package.
 type SceneMergeInput struct {
-	Source      []string         `json:"source"`
-	Destination string           `json:"destination"`
-	Values      *SceneUpdateVals `json:"values,omitempty"`
-	PlayHistory bool             `json:"play_history,omitempty"`
-	OHistory    bool             `json:"o_history,omitempty"`
+	Source      []string
+	Destination string
+	Values      *SceneUpdateVals
+	PlayHistory bool
+	OHistory    bool
 }
 
-// SceneUpdateVals is the subset of SceneUpdateInput that the merge union
-// engine populates. Pointer fields let us distinguish "leave unchanged"
-// (nil) from "set to empty value" (non-nil pointer to zero value).
+// SceneUpdateVals is the subset of a scene update that the merge union engine
+// populates. Pointer fields distinguish "leave unchanged" (nil) from "set to
+// the empty value" (non-nil pointer to zero).
 type SceneUpdateVals struct {
-	Title        *string        `json:"title,omitempty"`
-	Code         *string        `json:"code,omitempty"`
-	Details      *string        `json:"details,omitempty"`
-	Director     *string        `json:"director,omitempty"`
-	URLs         []string       `json:"urls,omitempty"`
-	Date         *string        `json:"date,omitempty"`
-	Rating100    *int           `json:"rating100,omitempty"`
-	Organized    *bool          `json:"organized,omitempty"`
-	StudioID     *string        `json:"studio_id,omitempty"`
-	GalleryIDs   []string       `json:"gallery_ids,omitempty"`
-	PerformerIDs []string       `json:"performer_ids,omitempty"`
-	TagIDs       []string       `json:"tag_ids,omitempty"`
-	StashIDs     []StashIDInput `json:"stash_ids,omitempty"`
+	Title        *string
+	Code         *string
+	Details      *string
+	Director     *string
+	URLs         []string
+	Date         *string
+	Rating100    *int
+	Organized    *bool
+	StudioID     *string
+	GalleryIDs   []string
+	PerformerIDs []string
+	TagIDs       []string
+	StashIDs     []StashIDInput
 }
 
-// StashIDInput is what sceneUpdate and sceneMerge take. Stash's input and
-// output shapes for a stash-box ID are the same, so this is the read type.
+// StashIDInput is what a scene update takes for a stash-box ID. Stash's input
+// and output shapes are the same, so this is the read type.
 type StashIDInput = StashID
 
-const sceneMergeMutation = `
-mutation SceneMerge($input: SceneMergeInput!) {
-  sceneMerge(input: $input) {
-    id
-  }
+// sceneUpdate renders the computed union as the shared client's update shape.
+// The destination id is filled in by the merge itself.
+func (v *SceneUpdateVals) sceneUpdate() *upstream.SceneUpdate {
+	if v == nil {
+		return nil
+	}
+	return &upstream.SceneUpdate{
+		Title:        v.Title,
+		Code:         v.Code,
+		Details:      v.Details,
+		Director:     v.Director,
+		URLs:         v.URLs,
+		Date:         v.Date,
+		Rating100:    v.Rating100,
+		Organized:    v.Organized,
+		StudioID:     v.StudioID,
+		GalleryIDs:   v.GalleryIDs,
+		PerformerIDs: v.PerformerIDs,
+		TagIDs:       v.TagIDs,
+		StashIDs:     v.StashIDs,
+	}
 }
-`
 
-// SceneMerge runs the sceneMerge mutation against Stash. The values field
-// must already be the computed metadata union — Stash does NOT auto-union
-// scene-level metadata.
+// SceneMerge folds the losers into the keeper. input.Values must already be
+// the computed metadata union — Stash does NOT auto-union scene-level
+// metadata.
+//
+// PlayHistory and OHistory carry the losers' watch times across. Stash
+// discards both by default, which is wrong for a deduplicating merge: the
+// scenes are the same content, so the times it was watched belong to the copy
+// being kept.
 func (c *Client) SceneMerge(ctx context.Context, input SceneMergeInput) error {
 	if len(input.Source) == 0 {
 		return errors.New("sceneMerge: source must contain at least one scene id")
@@ -236,42 +179,38 @@ func (c *Client) SceneMerge(ctx context.Context, input SceneMergeInput) error {
 	if input.Destination == "" {
 		return errors.New("sceneMerge: destination scene id is required")
 	}
-	vars := map[string]any{"input": input}
-	return c.Execute(ctx, sceneMergeMutation, vars, nil)
+	return c.up.MergeScenes(ctx, input.Destination, input.Source, input.Values.sceneUpdate(),
+		upstream.MergeOptions{PlayHistory: input.PlayHistory, OHistory: input.OHistory})
 }
 
 // ============================================================================
-// moveFiles — used by post-merge rename to preserve loser filename info
+// moveFiles — post-merge rename, and workflow D organize
 // ============================================================================
 
-// MoveFilesInput mirrors Stash's MoveFilesInput. destination_basename is
-// only valid for a single file id; we always use it that way to rename
-// the post-merge winner file in place.
+// MoveFilesInput mirrors Stash's MoveFilesInput. DestinationBasename is only
+// valid for a single file id.
 type MoveFilesInput struct {
-	IDs                 []string `json:"ids"`
-	DestinationFolder   string   `json:"destination_folder,omitempty"`
-	DestinationFolderID string   `json:"destination_folder_id,omitempty"`
-	DestinationBasename string   `json:"destination_basename,omitempty"`
+	IDs                 []string
+	DestinationFolder   string
+	DestinationFolderID string
+	DestinationBasename string
 }
 
-const moveFilesMutation = `
-mutation MoveFiles($input: MoveFilesInput!) {
-  moveFiles(input: $input)
-}
-`
-
-// MoveFiles calls Stash's moveFiles mutation. Used by post-merge rename
-// to give the winning file a human-readable basename derived from the
-// losing files' structured filenames.
+// MoveFiles moves files on disk and updates Stash to match. Used by
+// post-merge rename to give the winning file a human-readable basename
+// derived from the losing files' structured filenames.
 func (c *Client) MoveFiles(ctx context.Context, input MoveFilesInput) error {
 	if len(input.IDs) == 0 {
 		return nil
 	}
-	return c.Execute(ctx, moveFilesMutation, map[string]any{"input": input}, nil)
+	return c.up.MoveFiles(ctx, input.IDs, upstream.MoveTarget{
+		Folder:   input.DestinationFolder,
+		FolderID: input.DestinationFolderID,
+		Basename: input.DestinationBasename,
+	})
 }
 
-// RenameFile is a convenience wrapper for the common case of renaming
-// exactly one file in place (no folder change).
+// RenameFile renames exactly one file in place, with no folder change.
 func (c *Client) RenameFile(ctx context.Context, fileID, newBasename string) error {
 	return c.MoveFiles(ctx, MoveFilesInput{
 		IDs:                 []string{fileID},
@@ -280,269 +219,136 @@ func (c *Client) RenameFile(ctx context.Context, fileID, newBasename string) err
 }
 
 // ============================================================================
-// scenesDestroy — workflow A's hard-delete action
+// Destructive: scene and file deletion
 // ============================================================================
 
-const scenesDestroyMutation = `
-mutation ScenesDestroy($ids: [ID!]!) {
-  scenesDestroy(input: {
-    ids: $ids
-    delete_file: true
-    delete_generated: true
-  })
-}
-`
-
-// ScenesDestroy hard-deletes the given scenes from Stash AND deletes their
-// underlying files from disk. Used by `custodian scenes apply --action delete`
-// for the case where the user is certain there's nothing worth preserving
-// on the losers.
+// ScenesDestroy hard-deletes the given scenes AND their files from disk,
+// generated content included. Used by `custodian scenes apply --action
+// delete` when the user is certain there is nothing worth preserving on the
+// losers.
 //
-// This is the most destructive single mutation in the tool. The cli layer
-// must always gate it behind --commit + interactive YES (or --yes).
+// This is the most destructive call in the tool. The cli layer must always
+// gate it behind --commit plus an interactive YES (or --yes).
 func (c *Client) ScenesDestroy(ctx context.Context, sceneIDs []string) error {
 	if len(sceneIDs) == 0 {
 		return nil
 	}
-	vars := map[string]any{"ids": sceneIDs}
-	return c.Execute(ctx, scenesDestroyMutation, vars, nil)
+	return c.up.DeleteScenes(ctx, sceneIDs, upstream.DeleteOptions{
+		DeleteFile:      true,
+		DeleteGenerated: true,
+	})
 }
 
-// ============================================================================
-// deleteFiles — used by workflow B and post-merge cleanup
-// ============================================================================
-
-const deleteFilesMutation = `
-mutation DeleteFiles($ids: [ID!]!) {
-  deleteFiles(ids: $ids)
-}
-`
-
-// DeleteFiles removes the given files from both Stash's database AND from
-// the underlying filesystem. This is the "really delete it" mutation, NOT
-// destroyFiles (which only removes the DB entry and would let Stash re-add
-// the file on the next scan).
+// DeleteFiles removes the given files from Stash's database AND from disk.
+//
+// This is the "really delete it" mutation. Its neighbour upstream,
+// DestroyFiles, only drops the database record and leaves the video where it
+// is — which would let the next scan re-add everything this was meant to
+// reclaim.
 func (c *Client) DeleteFiles(ctx context.Context, fileIDs []string) error {
 	if len(fileIDs) == 0 {
 		return nil
 	}
-	vars := map[string]any{"ids": fileIDs}
-	return c.Execute(ctx, deleteFilesMutation, vars, nil)
+	return c.up.DeleteFiles(ctx, fileIDs...)
 }
 
 // ============================================================================
-// submitStashBoxFingerprints — sends file hashes upstream to stash-box
+// stash-box: fingerprint submission and orphan lookup
 // ============================================================================
 
-const submitStashBoxFingerprintsMutation = `
-mutation SubmitStashBoxFingerprints($scene_ids: [String!]!, $endpoint: String) {
-  submitStashBoxFingerprints(input: {
-    scene_ids: $scene_ids
-    stash_box_endpoint: $endpoint
-  })
-}
-`
-
-// SubmitStashBoxFingerprints uploads the given scenes' file fingerprints
-// (phash + oshash + md5) to the stash-box instance at endpoint. Used by
-// `--submit-fingerprints` after a successful apply so future Stash users
-// who scan the same files get an automatic stash-box match.
+// SubmitStashBoxFingerprints uploads the given scenes' fingerprints (phash +
+// oshash + md5) to the stash-box at endpoint, so future users who scan the
+// same files get an automatic match.
 //
-// All scenes are submitted in a single batch per endpoint. Stash returns
-// boolean true on success — there's no per-scene status.
+// Only scenes already linked to that stash-box contribute — the stash id is
+// what says which upstream scene the hashes belong to.
 func (c *Client) SubmitStashBoxFingerprints(ctx context.Context, sceneIDs []string, endpoint string) error {
 	if len(sceneIDs) == 0 {
 		return nil
 	}
-	vars := map[string]any{
-		"scene_ids": sceneIDs,
-		"endpoint":  endpoint,
-	}
-	return c.Execute(ctx, submitStashBoxFingerprintsMutation, vars, nil)
+	_, err := c.up.SubmitFingerprints(ctx, endpoint, sceneIDs...)
+	return err
 }
 
-// ============================================================================
-// All scenes (paginated) — used by workflow D organize
-// ============================================================================
-
-const findAllScenesQuery = sceneFieldsFragment + `
-query FindAllScenes($page: Int!, $per_page: Int!) {
-  findScenes(
-    filter: { page: $page, per_page: $per_page, sort: "id", direction: ASC }
-  ) {
-    count
-    scenes { ...SceneFields }
-  }
-}
-`
-
-// FindAllScenesPage returns one page of ALL scenes (no filter). Used by
-// `custodian organize scan` which needs to see every scene in the library to
-// compute ideal paths.
-func (c *Client) FindAllScenesPage(ctx context.Context, page, perPage int) (*FindScenesResult, error) {
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 100
-	}
-	var resp struct {
-		FindScenes FindScenesResult `json:"findScenes"`
-	}
-	vars := map[string]any{"page": page, "per_page": perPage}
-	if err := c.Execute(ctx, findAllScenesQuery, vars, &resp); err != nil {
-		return nil, fmt.Errorf("findAllScenes(page=%d): %w", page, err)
-	}
-	return &resp.FindScenes, nil
-}
-
-// ============================================================================
-// Workflow C: orphan stash-box lookup
-// ============================================================================
-
-const findOrphanScenesQuery = sceneFieldsFragment + `
-query FindOrphanScenes($page: Int!, $per_page: Int!) {
-  findScenes(
-    filter: { page: $page, per_page: $per_page, sort: "id", direction: ASC }
-    scene_filter: { stash_id_count: { value: 0, modifier: EQUALS } }
-  ) {
-    count
-    scenes { ...SceneFields }
-  }
-}
-`
-
-// FindOrphanScenesPage returns one page of scenes that have no stash_ids
-// attached. Used by `custodian orphans scan` to enumerate orphans before
-// querying stash-box.
-func (c *Client) FindOrphanScenesPage(ctx context.Context, page, perPage int) (*FindScenesResult, error) {
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 100
-	}
-	var resp struct {
-		FindScenes FindScenesResult `json:"findScenes"`
-	}
-	vars := map[string]any{"page": page, "per_page": perPage}
-	if err := c.Execute(ctx, findOrphanScenesQuery, vars, &resp); err != nil {
-		return nil, fmt.Errorf("findOrphanScenes(page=%d): %w", page, err)
-	}
-	return &resp.FindScenes, nil
-}
-
-const scrapeMultiScenesQuery = `
-query ScrapeMultiScenes($endpoint: String!, $scene_ids: [ID!]!) {
-  scrapeMultiScenes(
-    source: { stash_box_endpoint: $endpoint }
-    input:  { scene_ids: $scene_ids }
-  ) {
-    remote_site_id
-    title
-    date
-    urls
-    studio { name remote_site_id }
-    performers { name remote_site_id }
-  }
-}
-`
-
-// ScrapeMultiScenes asks Stash to query a stash-box endpoint for matches
-// to the given scene_ids by their fingerprints. Returns a slice of slices
-// parallel to scene_ids — each inner slice is the matches stash-box
-// returned for that scene (empty when no match).
+// ScrapeMultiScenes asks stash-box for matches to the given scene_ids by
+// their fingerprints. The result is parallel to sceneIDs — one entry per
+// scene, empty where stash-box recognised nothing.
 //
-// Stash internally throttles per the configured `max_requests_per_minute`,
-// so the caller can fire batches as fast as they like and Stash will
-// queue.
+// Stash throttles upstream per its configured max_requests_per_minute, so the
+// caller can fire batches as fast as it likes.
 func (c *Client) ScrapeMultiScenes(ctx context.Context, endpoint string, sceneIDs []string) ([][]ScrapedScene, error) {
 	if endpoint == "" {
 		return nil, errors.New("ScrapeMultiScenes: endpoint is required")
 	}
-	if len(sceneIDs) == 0 {
-		return nil, nil
-	}
-	var resp struct {
-		ScrapeMultiScenes [][]ScrapedScene `json:"scrapeMultiScenes"`
-	}
-	vars := map[string]any{
-		"endpoint":  endpoint,
-		"scene_ids": sceneIDs,
-	}
-	if err := c.Execute(ctx, scrapeMultiScenesQuery, vars, &resp); err != nil {
-		return nil, fmt.Errorf("scrapeMultiScenes: %w", err)
-	}
-	return resp.ScrapeMultiScenes, nil
+	return c.up.ScrapeMultiScenes(ctx, endpoint, sceneIDs)
 }
 
-const setSceneStashIDsMutation = `
-mutation SetSceneStashIDs($id: ID!, $stash_ids: [StashIDInput!]!) {
-  sceneUpdate(input: { id: $id, stash_ids: $stash_ids }) {
-    id
-  }
-}
-`
-
-// SetSceneStashIDs replaces a scene's stash_ids list. Used by
-// `custodian orphans apply` to write a stash-box match back to Stash.
+// SetSceneStashIDs replaces a scene's stash_ids list. Used by `custodian
+// orphans apply` to write a stash-box match back to Stash.
 //
-// Note: this REPLACES the list. If the scene already has stash_ids for
-// other endpoints, the caller is responsible for unioning them in.
+// Note: this REPLACES the list. If the scene already has stash_ids for other
+// endpoints, the caller is responsible for unioning them in.
 func (c *Client) SetSceneStashIDs(ctx context.Context, sceneID string, stashIDs []StashIDInput) error {
-	vars := map[string]any{
-		"id":        sceneID,
-		"stash_ids": stashIDs,
-	}
-	return c.Execute(ctx, setSceneStashIDsMutation, vars, nil)
+	return c.up.SetSceneStashIDs(ctx, sceneID, stashIDs)
 }
 
-const setSceneTitleDateMutation = `
-mutation SetSceneTitleDate($id: ID!, $title: String, $date: String) {
-  sceneUpdate(input: { id: $id, title: $title, date: $date }) {
-    id
-  }
-}
-`
-
-// SetSceneTitleDate writes title and/or date onto a scene, but only if the
-// scene's current value for that field is empty — avoids overwriting
-// user-set metadata. Called by orphans apply when
-// orphans.write_metadata_on_apply is enabled.
+// SetSceneTitleDate writes title and/or date onto a scene. Called by orphans
+// apply when orphans.write_metadata_on_apply is enabled; the caller is
+// responsible for only passing values it is willing to overwrite.
+//
+// An empty string leaves that field alone rather than clearing it.
 func (c *Client) SetSceneTitleDate(ctx context.Context, sceneID, title, date string) error {
-	vars := map[string]any{
-		"id": sceneID,
-	}
+	update := upstream.SceneUpdate{ID: sceneID}
 	if title != "" {
-		vars["title"] = title
+		update.Title = &title
 	}
 	if date != "" {
-		vars["date"] = date
+		update.Date = &date
 	}
-	if len(vars) == 1 {
+	if update.Title == nil && update.Date == nil {
 		return nil // nothing to set
 	}
-	return c.Execute(ctx, setSceneTitleDateMutation, vars, nil)
+	return c.up.UpdateScene(ctx, update)
+}
+
+// ============================================================================
+// Whole-library enumeration
+// ============================================================================
+
+// FindAllScenesPage returns one page of every scene, unfiltered. Used by
+// `custodian organize scan`, which needs the whole library to compute ideal
+// paths.
+func (c *Client) FindAllScenesPage(ctx context.Context, page, perPage int) (*FindScenesResult, error) {
+	return c.scenePage(ctx, upstream.SceneFilter{}, page, perPage, "findAllScenes")
+}
+
+// FindOrphanScenesPage returns one page of scenes with no stash_ids attached.
+// Used by `custodian orphans scan` to enumerate orphans before querying
+// stash-box.
+func (c *Client) FindOrphanScenesPage(ctx context.Context, page, perPage int) (*FindScenesResult, error) {
+	hasStashID := false
+	return c.scenePage(ctx, upstream.SceneFilter{HasStashID: &hasStashID}, page, perPage, "findOrphanScenes")
+}
+
+// scenePage is the paging shape every enumeration here wants: one page plus
+// the total, so a caller can loop without a second count query.
+func (c *Client) scenePage(ctx context.Context, filter upstream.SceneFilter, page, perPage int, what string) (*FindScenesResult, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 100
+	}
+	scenes, count, err := c.up.FindScenes(ctx, filter, page, perPage)
+	if err != nil {
+		return nil, fmt.Errorf("%s(page=%d): %w", what, page, err)
+	}
+	return &FindScenesResult{Count: count, Scenes: scenes}, nil
 }
 
 // ============================================================================
 // Diagnostics & configuration discovery
 // ============================================================================
-
-const versionQuery = `{ version { version build_time } }`
-
-const libraryStatsQuery = `
-{
-  stats {
-    scene_count
-    scenes_size
-    scenes_duration
-  }
-  findScenes(filter: {per_page: 0}, scene_filter: {stash_id_count: {value: 0, modifier: GREATER_THAN}}) {
-    count
-  }
-}
-`
 
 // LibraryStats holds quick top-level numbers about the user's Stash library.
 type LibraryStats struct {
@@ -553,91 +359,46 @@ type LibraryStats struct {
 }
 
 // LibraryStats fetches aggregate counts from Stash. Used by `custodian stats`.
+//
+// Two calls: the server's own totals, plus a count of the scenes carrying
+// stash-box metadata, which the totals do not include.
 func (c *Client) LibraryStats(ctx context.Context) (*LibraryStats, error) {
-	var resp struct {
-		Stats struct {
-			SceneCount     int     `json:"scene_count"`
-			ScenesSize     float64 `json:"scenes_size"`
-			ScenesDuration float64 `json:"scenes_duration"`
-		} `json:"stats"`
-		FindScenes struct {
-			Count int `json:"count"`
-		} `json:"findScenes"`
-	}
-	if err := c.Execute(ctx, libraryStatsQuery, nil, &resp); err != nil {
+	stats, err := c.up.LibraryStats(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("libraryStats: %w", err)
 	}
+	hasStashID := true
+	_, withMetadata, err := c.up.FindScenes(ctx, upstream.SceneFilter{HasStashID: &hasStashID}, 1, 0)
+	if err != nil {
+		return nil, fmt.Errorf("libraryStats: counting scenes with metadata: %w", err)
+	}
 	return &LibraryStats{
-		SceneCount:     resp.Stats.SceneCount,
-		ScenesSizeGB:   resp.Stats.ScenesSize / (1024 * 1024 * 1024),
-		ScenesDuration: resp.Stats.ScenesDuration,
-		WithMetadata:   resp.FindScenes.Count,
+		SceneCount:     stats.SceneCount,
+		ScenesSizeGB:   stats.ScenesSize / (1024 * 1024 * 1024),
+		ScenesDuration: stats.ScenesDuration,
+		WithMetadata:   withMetadata,
 	}, nil
 }
 
-const configurationStashBoxesQuery = `
-{
-  configuration {
-    general {
-      stashBoxes { endpoint name }
-    }
-  }
-}
-`
-
-// StashBoxes returns the list of stash-box endpoints currently configured
-// in Stash's general settings. Used by `custodian orphans scan` to discover
-// which endpoint(s) to query when the user hasn't passed --endpoint.
+// StashBoxes returns the stash-box endpoints configured in Stash. Used to
+// decide which endpoint(s) to query when the user has not passed --endpoint.
 func (c *Client) StashBoxes(ctx context.Context) ([]StashBoxConfig, error) {
-	var resp struct {
-		Configuration struct {
-			General struct {
-				StashBoxes []StashBoxConfig `json:"stashBoxes"`
-			} `json:"general"`
-		} `json:"configuration"`
-	}
-	if err := c.Execute(ctx, configurationStashBoxesQuery, nil, &resp); err != nil {
-		return nil, fmt.Errorf("configuration: %w", err)
-	}
-	return resp.Configuration.General.StashBoxes, nil
+	return c.up.StashBoxes(ctx)
 }
 
-// Version returns Stash's version info. Used for connectivity smoke tests
-// and to record the schema version custodian was talking to in scan_runs.
+// Version returns Stash's version and build time. Used for connectivity smoke
+// tests and to record which server custodian was talking to in scan_runs.
 func (c *Client) Version(ctx context.Context) (string, string, error) {
-	var resp struct {
-		Version struct {
-			Version   string `json:"version"`
-			BuildTime string `json:"build_time"`
-		} `json:"version"`
-	}
-	if err := c.Execute(ctx, versionQuery, nil, &resp); err != nil {
+	v, err := c.up.ServerVersion(ctx)
+	if err != nil {
 		return "", "", err
 	}
-	return resp.Version.Version, resp.Version.BuildTime, nil
+	return v.Version, v.BuildTime, nil
 }
 
 // ============================================================================
 // creator vocabulary — performer and studio names, used by `subs` matching
 // ============================================================================
-
-const findPerformerNamesQuery = `
-query FindPerformerNames($page: Int!, $per_page: Int!) {
-  findPerformers(filter: {page: $page, per_page: $per_page, sort: "id", direction: ASC}) {
-    count
-    performers { name alias_list }
-  }
-}
-`
-
-const findStudioNamesQuery = `
-query FindStudioNames($page: Int!, $per_page: Int!) {
-  findStudios(filter: {page: $page, per_page: $per_page, sort: "id", direction: ASC}) {
-    count
-    studios { name aliases }
-  }
-}
-`
 
 // CreatorNames returns every performer and studio name in the library, plus
 // their aliases.
@@ -646,58 +407,53 @@ query FindStudioNames($page: Int!, $per_page: Int!) {
 // called". Deriving the list from Stash rather than hard-coding it means it
 // covers the whole library, stays correct as the library grows, and keeps
 // personal names out of committed source.
+//
+// Blank entries are dropped. Stash lets an alias list hold an empty string,
+// and a few in any real library do; an empty string is not a name, and
+// letting one into a matching vocabulary is the kind of value that matches
+// everything.
 func (c *Client) CreatorNames(ctx context.Context) ([]string, error) {
 	const perPage = 1000
 	var out []string
 
-	for page := 1; ; page++ {
-		var resp struct {
-			FindPerformers struct {
-				Count      int `json:"count"`
-				Performers []struct {
-					Name      string   `json:"name"`
-					AliasList []string `json:"alias_list"`
-				} `json:"performers"`
-			} `json:"findPerformers"`
+	add := func(names ...string) {
+		for _, n := range names {
+			if n != "" {
+				out = append(out, n)
+			}
 		}
-		vars := map[string]any{"page": page, "per_page": perPage}
-		if err := c.Execute(ctx, findPerformerNamesQuery, vars, &resp); err != nil {
+	}
+
+	for page := 1; ; page++ {
+		performers, count, err := c.up.FindPerformers(ctx, upstream.PerformerFilter{}, page, perPage)
+		if err != nil {
 			return nil, fmt.Errorf("findPerformers(page=%d): %w", page, err)
 		}
-		if len(resp.FindPerformers.Performers) == 0 {
+		if len(performers) == 0 {
 			break
 		}
-		for _, p := range resp.FindPerformers.Performers {
-			out = append(out, p.Name)
-			out = append(out, p.AliasList...)
+		for _, p := range performers {
+			add(p.Name)
+			add(p.Aliases...)
 		}
-		if page*perPage >= resp.FindPerformers.Count {
+		if page*perPage >= count {
 			break
 		}
 	}
 
 	for page := 1; ; page++ {
-		var resp struct {
-			FindStudios struct {
-				Count   int `json:"count"`
-				Studios []struct {
-					Name    string   `json:"name"`
-					Aliases []string `json:"aliases"`
-				} `json:"studios"`
-			} `json:"findStudios"`
-		}
-		vars := map[string]any{"page": page, "per_page": perPage}
-		if err := c.Execute(ctx, findStudioNamesQuery, vars, &resp); err != nil {
+		studios, count, err := c.up.Studios(ctx, page, perPage)
+		if err != nil {
 			return nil, fmt.Errorf("findStudios(page=%d): %w", page, err)
 		}
-		if len(resp.FindStudios.Studios) == 0 {
+		if len(studios) == 0 {
 			break
 		}
-		for _, s := range resp.FindStudios.Studios {
-			out = append(out, s.Name)
-			out = append(out, s.Aliases...)
+		for _, s := range studios {
+			add(s.Name)
+			add(s.Aliases...)
 		}
-		if page*perPage >= resp.FindStudios.Count {
+		if page*perPage >= count {
 			break
 		}
 	}
