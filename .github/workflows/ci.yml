@@ -27,6 +27,13 @@ jobs:
     with:
       binary-name: custodian
       main-package: ./cmd/custodian
+      # Path building in internal/organize/template.go and the config dirs in
+      # internal/config/paths.go branch on runtime.GOOS/filepath.Separator.
+      platform-tests: true
+      # The library-mutation logic (merge/dedup/scan) is unit-tested against
+      # fixtures and a fake VFS, not a live Stash, so it should never need a
+      # network reach.
+      offline-isolation: true
 
 # What Custodian gains by adopting: gotestsum + JUnit + Codecov upload, the
 # coverage step summary, and a cross-build matrix — none of which its hand-
