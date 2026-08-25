@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -22,7 +23,7 @@ func (s *Store) UpsertFileGroup(ctx context.Context, fg *FileGroup) error {
 		fg.ScanRunID, fg.SceneID,
 	).Scan(&existingID)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		res, ierr := tx.ExecContext(ctx,
 			`INSERT INTO file_groups
 			 (scan_run_id, scene_id, status, decision_reason, decided_at, applied_at)

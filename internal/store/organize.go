@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -14,7 +15,7 @@ func (s *Store) UpsertOrganizePlan(ctx context.Context, p *OrganizePlan) error {
 		p.ScanRunID, p.FileID,
 	).Scan(&existingID)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		res, ierr := s.db.ExecContext(ctx,
 			`INSERT INTO organize_plans
 			 (scan_run_id, scene_id, file_id, current_path, target_path, status, reason, applied_at)

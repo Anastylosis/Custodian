@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -29,7 +30,7 @@ func (s *Store) UpsertSceneGroup(ctx context.Context, g *SceneGroup) error {
 		g.ScanRunID, g.Signature,
 	).Scan(&existingID)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		res, ierr := tx.ExecContext(ctx,
 			`INSERT INTO scene_groups
 			 (scan_run_id, signature, status, decision_reason, decided_at, applied_at)
@@ -237,7 +238,7 @@ func scanSceneGroup(row *sql.Row) (*SceneGroup, error) {
 	var decidedAt, appliedAt sql.NullString
 	if err := row.Scan(&g.ID, &g.ScanRunID, &g.Signature, &g.Status,
 		&g.DecisionReason, &decidedAt, &appliedAt); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err

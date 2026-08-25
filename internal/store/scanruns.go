@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -63,7 +64,7 @@ func scanScanRun(row *sql.Row) (*ScanRun, error) {
 		durDiff  sql.NullFloat64
 	)
 	if err := row.Scan(&r.ID, &r.Workflow, &started, &finished, &distance, &durDiff, &r.GroupCount, &r.Notes); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err

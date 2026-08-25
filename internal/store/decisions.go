@@ -68,7 +68,7 @@ func (s *Store) GetUserDecision(ctx context.Context, key string) (*UserDecision,
 	var d UserDecision
 	var decidedAt string
 	if err := row.Scan(&d.Key, &d.Workflow, &d.Decision, &d.KeeperID, &decidedAt, &d.Notes); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err

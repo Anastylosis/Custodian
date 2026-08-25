@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -16,7 +17,7 @@ func (s *Store) UpsertOrphanLookup(ctx context.Context, o *OrphanLookup) error {
 		o.ScanRunID, o.SceneID, o.Endpoint,
 	).Scan(&existingID)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		res, ierr := s.db.ExecContext(ctx,
 			`INSERT INTO orphan_lookups
 			 (scan_run_id, scene_id, endpoint, status, decision_reason,
