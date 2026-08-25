@@ -131,7 +131,12 @@ func copyThenRemove(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("open %q: %w", src, err)
 	}
-	defer func() { _ = in.Close() }()
+	inClosed := false
+	defer func() {
+		if !inClosed {
+			_ = in.Close()
+		}
+	}()
 
 	tmp := dst + ".sj-partial"
 	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
@@ -156,6 +161,12 @@ func copyThenRemove(src, dst string) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("finalise %q: %w", dst, err)
 	}
+	// Windows refuses to remove a file that still has an open handle, so the
+	// source is closed here rather than by the deferred safety net above.
+	if err := in.Close(); err != nil {
+		return fmt.Errorf("copied to %q but could not close original %q: %w", dst, src, err)
+	}
+	inClosed = true
 	if err := os.Remove(src); err != nil {
 		// The copy succeeded, so the sidecar is in place; report the leftover
 		// rather than failing the whole move.
