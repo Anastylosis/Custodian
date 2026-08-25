@@ -35,6 +35,30 @@ jobs:
       # network reach.
       offline-isolation: true
 
+  # Custodian *mutates* a library — merge, dedup, scan — and until this job
+  # nothing in CI had ever pointed it at a running Stash. The sibling repos
+  # cover that kind of risk with a manual approval gate before a release;
+  # Custodian deliberately has none (CONTRIBUTING.md), because this harness
+  # boots a throwaway Stash, seeds it and runs the suite against it on every
+  # single push — a check that runs continuously and can actually fail, rather
+  # than an attestation at release time that nothing verifies.
+  stash-integration:
+    name: Stash integration
+    uses: Anastylosis/.github/.github/workflows/stash-integration.yml@v1
+    # `contents: read` is the whole requirement: the harness needs no OIDC
+    # token and no secrets.
+    permissions:
+      contents: read
+    with:
+      url-env-var: SFX_INT_STASH_URL
+      # The switch that lets this job fail. Without it every assertion in
+      # internal/stash/integration_test.go is free to skip on an empty library
+      # and still report green.
+      seeded-env-var: SFX_INT_STASH_SEEDED
+      # No build tag on these tests, so the harness default
+      # (`-tags=integration ./...`) would run nothing.
+      test-command: go test -count=1 ./internal/stash/...
+
 # What Custodian gains by adopting: gotestsum + JUnit + Codecov upload, the
 # coverage step summary, and a cross-build matrix — none of which its hand-
 # written ci.yml had. It keeps the exact action pinning it already insisted
@@ -43,6 +67,9 @@ jobs:
 # Custodian has no Dockerfile, so check-dockerfile-go-version stays off and
 # there is no docker workflow to adopt.
 #
-# Its internal/stash/integration_test.go carries no build tag, so it runs in
-# the normal suite. If that ever starts hitting a live Stash, gate it behind
-# //go:build integration and flip vet-integration-tag on.
+# Its internal/stash/integration_test.go carries no build tag: it is gated on
+# SFX_INT_STASH_URL at runtime instead, so `go test ./...` in the `ci` job
+# skips every one of those tests and stays hermetic. The stash-integration job
+# is what supplies that variable — along with SFX_INT_STASH_SEEDED, which
+# turns the skips into assertions. vet-integration-tag stays off; there is no
+# tag for it to check.
