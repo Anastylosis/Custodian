@@ -115,7 +115,7 @@ Use 'custodian files report' to find the scene ID you want to mark.`,
 	return cmd
 }
 
-func runFilesScan(cmd *cobra.Command, args []string) error {
+func runFilesScan(cmd *cobra.Command, _ []string) error {
 	cfg, st, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -146,7 +146,7 @@ func runFilesScan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runFilesStatus(cmd *cobra.Command, args []string) error {
+func runFilesStatus(cmd *cobra.Command, _ []string) error {
 	_, st, _, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -163,7 +163,7 @@ func runFilesStatus(cmd *cobra.Command, args []string) error {
 	return report.PrintFilesStatus(cmd.OutOrStdout(), s)
 }
 
-func runFilesReport(cmd *cobra.Command, args []string) error {
+func runFilesReport(cmd *cobra.Command, _ []string) error {
 	cfg, st, _, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -185,7 +185,7 @@ func runFilesReport(cmd *cobra.Command, args []string) error {
 	return report.PrintFilesReport(out, groups, explain)
 }
 
-func runFilesApply(cmd *cobra.Command, args []string) error {
+func runFilesApply(cmd *cobra.Command, _ []string) error {
 	_, st, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -250,7 +250,7 @@ func runFilesApply(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runFilesMark(cmd *cobra.Command, args []string) error {
+func runFilesMark(cmd *cobra.Command, _ []string) error {
 	if flagFilesMarkSceneID == "" {
 		return fmt.Errorf("--scene-id is required (run `custodian files report` to find one)")
 	}

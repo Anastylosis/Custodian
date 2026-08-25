@@ -160,7 +160,7 @@ func loadConfigAndStore() (*config.Config, *store.Store, *stash.Client, func(), 
 	return cfg, st, client, cleanup, nil
 }
 
-func runScenesScan(cmd *cobra.Command, args []string) error {
+func runScenesScan(cmd *cobra.Command, _ []string) error {
 	cfg, st, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -192,7 +192,7 @@ func runScenesScan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runScenesStatus(cmd *cobra.Command, args []string) error {
+func runScenesStatus(cmd *cobra.Command, _ []string) error {
 	_, st, _, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -209,7 +209,7 @@ func runScenesStatus(cmd *cobra.Command, args []string) error {
 	return report.PrintScenesStatus(cmd.OutOrStdout(), s)
 }
 
-func runScenesReport(cmd *cobra.Command, args []string) error {
+func runScenesReport(cmd *cobra.Command, _ []string) error {
 	cfg, st, _, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -235,7 +235,7 @@ func runScenesReport(cmd *cobra.Command, args []string) error {
 	return report.PrintScenesReport(out, groups, explain)
 }
 
-func runScenesApply(cmd *cobra.Command, args []string) error {
+func runScenesApply(cmd *cobra.Command, _ []string) error {
 	cfg, st, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -397,7 +397,7 @@ func submitFingerprintsForScenePlan(
 	return apply.PrintFingerprintReport(out, report)
 }
 
-func runScenesMark(cmd *cobra.Command, args []string) error {
+func runScenesMark(cmd *cobra.Command, _ []string) error {
 	switch flagScenesMarkAs {
 	case "not_duplicate", "dismiss", "force_keeper":
 	case "":

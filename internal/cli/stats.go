@@ -22,7 +22,7 @@ you run in a new session before deciding which workflow to run next.`,
 	}
 }
 
-func runStats(cmd *cobra.Command, args []string) error {
+func runStats(cmd *cobra.Command, _ []string) error {
 	_, st, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err

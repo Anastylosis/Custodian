@@ -170,7 +170,7 @@ func ExecuteMerge(
 func executeOneMerge(
 	ctx context.Context,
 	c *stash.Client,
-	st *store.Store,
+	_ *store.Store,
 	cfg *config.Config,
 	scorer *decide.FileScorer,
 	g *store.SceneGroup,

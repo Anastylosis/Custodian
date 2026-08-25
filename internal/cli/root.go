@@ -39,7 +39,7 @@ tag-only for cross-scene duplicates, report-only for within-scene files.
 
 See PLAN.md for the full design.`,
 		SilenceUsage: true,
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			setupLogger(cmd.ErrOrStderr(), flagVerbose)
 			return nil
 		},

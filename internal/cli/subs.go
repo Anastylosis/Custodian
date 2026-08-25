@@ -307,7 +307,7 @@ func collectAndMatch(ctx context.Context, cmd *cobra.Command, env *subsEnv, cfg 
 	return matches, attached, nil
 }
 
-func runSubsScan(cmd *cobra.Command, args []string) error {
+func runSubsScan(cmd *cobra.Command, _ []string) error {
 	cfg, _, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -351,7 +351,7 @@ func runSubsScan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runSubsApply(cmd *cobra.Command, args []string) error {
+func runSubsApply(cmd *cobra.Command, _ []string) error {
 	cfg, _, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err

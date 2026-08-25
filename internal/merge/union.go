@@ -213,16 +213,16 @@ func BuildUnion(keeper *stash.Scene, losers []*stash.Scene, cfg *config.Config) 
 		if keeper.Rating100 != nil {
 			keeperR = *keeper.Rating100
 		}
-		max := keeperR
+		highest := keeperR
 		for _, l := range losers {
-			if l.Rating100 != nil && *l.Rating100 > max {
-				max = *l.Rating100
+			if l.Rating100 != nil && *l.Rating100 > highest {
+				highest = *l.Rating100
 			}
 		}
-		if max > keeperR {
-			r := max
+		if highest > keeperR {
+			r := highest
 			vals.Rating100 = &r
-			diffs = append(diffs, FieldDiff{Field: "rating100", Action: "set", Details: fmt.Sprintf("%d", max)})
+			diffs = append(diffs, FieldDiff{Field: "rating100", Action: "set", Details: fmt.Sprintf("%d", highest)})
 		}
 	}
 

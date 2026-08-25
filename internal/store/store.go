@@ -20,6 +20,9 @@ import (
 	"fmt"
 	"time"
 
+	// Registers the "sqlite" driver with database/sql; database/Open below
+	// dials it by name, so nothing in this file references the package
+	// directly.
 	_ "modernc.org/sqlite"
 )
 

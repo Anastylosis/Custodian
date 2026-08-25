@@ -95,7 +95,7 @@ unless --rescan is set.`,
 	return cmd
 }
 
-func runOrphansScan(cmd *cobra.Command, args []string) error {
+func runOrphansScan(cmd *cobra.Command, _ []string) error {
 	cfg, st, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -138,7 +138,7 @@ func runOrphansScan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runOrphansStatus(cmd *cobra.Command, args []string) error {
+func runOrphansStatus(cmd *cobra.Command, _ []string) error {
 	_, st, _, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -155,7 +155,7 @@ func runOrphansStatus(cmd *cobra.Command, args []string) error {
 	return report.PrintOrphansStatus(cmd.OutOrStdout(), s)
 }
 
-func runOrphansReport(cmd *cobra.Command, args []string) error {
+func runOrphansReport(cmd *cobra.Command, _ []string) error {
 	_, st, _, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -173,7 +173,7 @@ func runOrphansReport(cmd *cobra.Command, args []string) error {
 	return report.PrintOrphansReport(out, rows)
 }
 
-func runOrphansApply(cmd *cobra.Command, args []string) error {
+func runOrphansApply(cmd *cobra.Command, _ []string) error {
 	cfg, st, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err

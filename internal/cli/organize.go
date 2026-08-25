@@ -73,7 +73,7 @@ needed to compute their ideal path.`,
 	return cmd
 }
 
-func runOrganizeScan(cmd *cobra.Command, args []string) error {
+func runOrganizeScan(cmd *cobra.Command, _ []string) error {
 	cfg, st, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -104,7 +104,7 @@ func runOrganizeScan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runOrganizeReport(cmd *cobra.Command, args []string) error {
+func runOrganizeReport(cmd *cobra.Command, _ []string) error {
 	_, st, _, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
@@ -136,7 +136,7 @@ func runOrganizeReport(cmd *cobra.Command, args []string) error {
 	return organize.PrintReport(cmd.OutOrStdout(), plans)
 }
 
-func runOrganizeApply(cmd *cobra.Command, args []string) error {
+func runOrganizeApply(cmd *cobra.Command, _ []string) error {
 	cfg, st, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err

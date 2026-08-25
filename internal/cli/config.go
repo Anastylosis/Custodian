@@ -20,7 +20,7 @@ func newConfigCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "init",
 		Short: "Write a default config file (XDG location or --config path)",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			path := flagConfigPath
 			if path == "" {
 				path = config.DefaultConfigInitPath()
@@ -43,7 +43,7 @@ func newConfigCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "path",
 		Short: "Print the config file path that would be used",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			path := flagConfigPath
 			if path == "" {
 				path = config.DefaultConfigPath()
@@ -56,7 +56,7 @@ func newConfigCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "show",
 		Short: "Load the current config (defaults + your overrides) and print it as YAML",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			path := flagConfigPath
 			if path == "" {
 				path = config.DefaultConfigPath()

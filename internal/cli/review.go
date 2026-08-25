@@ -36,7 +36,7 @@ Decisions are saved to custodian.sqlite and take effect on the next
 	return cmd
 }
 
-func runReview(cmd *cobra.Command, args []string) error {
+func runReview(cmd *cobra.Command, _ []string) error {
 	cfg, st, _, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err

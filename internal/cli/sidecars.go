@@ -52,7 +52,7 @@ your real library before you rely on it.`,
 	return cmd
 }
 
-func runSidecarsCheck(cmd *cobra.Command, args []string) error {
+func runSidecarsCheck(cmd *cobra.Command, _ []string) error {
 	cfg, _, client, cleanup, err := loadConfigAndStore()
 	if err != nil {
 		return err
