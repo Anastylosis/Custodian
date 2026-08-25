@@ -2,6 +2,7 @@
 /custodian
 /custodian.exe
 /cmd/custodian/custodian
+/main
 /dist/
 
 # SQLite cache files
