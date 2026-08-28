@@ -73,8 +73,10 @@ sync → scan → canon → rejudge → plan → apply → prune
 
 Each step reads what the last one wrote into the ledger. `canon` and `rejudge`
 are optional and only matter for groups whose copies disagree on runtime.
-`undo` reverses an `apply`. `file` and `captions` are hygiene that rides along
-with the library rather than steps in the chain.
+`identify` is opt-in and off by default — it never runs unless you pass
+`--via` — and feeds newly-identified scenes back through the chain above on
+your next `sync`. `undo` reverses an `apply`. `file` and `captions` are
+hygiene that rides along with the library rather than steps in the chain.
 
 Running `custodian` with no arguments prints this list.
 
@@ -179,6 +181,38 @@ Two sources, both optional; configure whichever you have:
 | `--limit N` | 0 | cap how many scenes are looked up |
 
 `canon` only fetches and stores. `rejudge` is what acts on the results.
+
+### `custodian identify`
+
+**Not run by default, and never guesses which route you want** — REBUILD.md
+§0's decision: Custodian does not identify scenes unless asked, and it never
+sets `stash_ids` itself. `--via` is required.
+
+> Matches are not proof of identity — stash-box fingerprint matching in
+> particular has false positives. Nothing is written without `--commit`.
+
+- **`--via url`** — scenes carrying a URL (e.g. from FSS) and no `stash_id`
+  are asked, through Stash's own URL scraper, what that page says. Empty
+  `title`/`code`/`date`/`details`/`director` fields are filled from the
+  answer (never overwritten); a stash-box id in the answer is handed to
+  Stash's own `metadataIdentify`, restricted to that one scene.
+- **`--via stash-box`** — scenes with no `stash_id` are pre-screened with
+  `scrapeMultiScenes`: only a scene with exactly one candidate whose
+  duration matches within the trimmed tolerance (5%/90s) is handed to
+  `metadataIdentify`; everything else is held and listed as such.
+
+Neither route ever calls `sceneUpdate` with `stash_ids` — the identity
+decision stays Stash's own job. After a commit, `identify` re-syncs the
+ledger and reports how many scenes gained a `stash_id`.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--via NAME` | — (required) | `url` or `stash-box` |
+| `--endpoint URL` | `sources.stash_box_endpoint` | stash-box to scrape (`--via stash-box`) |
+| `--limit N` | 0 | cap how many scenes are considered |
+| `--commit` | off | actually write to Stash |
+| `--yes` | off | skip the interactive YES prompt (still needs `--commit`) |
+| `--ledger PATH` | — | ledger file to use |
 
 ### `custodian rejudge`
 
@@ -540,13 +574,53 @@ anything. `validate` names each retired key and what replaced it:
 
 Read-only. Checks that Stash answers, that the ledger is readable, that the
 sidecar backend opens, and that `sidecars.path_map` resolves real library
-paths to readable ones. Run it after editing the config, and before the first
+paths to readable ones — then prints a **gap report** from the ledger
+(REBUILD.md §7 phase 0): files with no phash, files sitting in the
+quarantine directory that no logged move put there ("foreign" quarantine),
+scenes with no primary file, scenes tombstoned in the ledger but still
+referenced by a live duplicate group, and how the ledger's last sync
+compares to what Stash reports right now. Each finding is one line with a
+suggested action. Run it after editing the config, and before the first
 `--commit`.
+
+```
+gap report:
+  phash gap:      1401 files, 2.34 TiB, 1 with a stash_id already — `custodian doctor --generate-phashes`
+                    /data/tmp4: 1360 of 4071 live
+                    /data/tmp3: 23 of 5040 live
+                    /data/_quarantine: 16 of 16 live
+  quarantine:     16 foreign file(s), 13.86 GiB — not put there by any logged move; inspect by hand
+                    /data/_quarantine/…
+  no primary:     none
+  tombstoned:     none
+  sync age:       last 2026-08-28T08:50:29Z (incremental); ledger matches Stash at 61217 scenes
+```
+
+`--generate-phashes` switches `doctor` into a different mode: it collects
+the scene ids of every live file with no phash and, with `--commit`, hands
+them to Stash's generate task (`MetadataGenerate`, `Phashes: true`), waits
+for the job, then re-fetches those scenes by id and upserts them into the
+ledger — `MetadataGenerate` does not bump `scene.updated_at`, so an
+incremental `sync` would never notice they changed. **Dry run by default.**
+
+```
+generate phashes: 1401 file(s) with none
+  first paths:
+    /data/Tara Tainton/2009-12-21_Tara.Tainton-Getting.Off.with.My.Sexy.Bandanas_480p.mp4
+    /data/_quarantine/…
+
+DRY RUN — nothing was sent to Stash. Re-run with --commit to act.
+```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--sample N` | 5 | how many real library paths to test the mapping against |
 | `--path PATH` | — | test one Stash path instead of sampling |
+| `--json` | off | emit the gap report as JSON instead of the text checks |
+| `--generate-phashes` | off | generate phashes for every live file that has none, instead of printing the report |
+| `--commit` | off | with `--generate-phashes`, actually start the job |
+| `--yes` | off | skip the interactive YES prompt (still needs `--commit`) |
+| `--limit N` | 0 | with `--generate-phashes`, cap how many files are acted on |
 
 ## Configuration reference
 

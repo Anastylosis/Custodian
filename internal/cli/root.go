@@ -24,6 +24,7 @@ var chain = []struct{ name, what string }{
 	{"sync", "mirror Stash's scenes and files into the local ledger"},
 	{"scan", "find duplicate-candidate groups from the ledger's signals"},
 	{"canon", "fetch canonical runtimes from a stash-box or an FSS catalogue"},
+	{"identify", "link scenes to a stash-box, opt-in and never silent"},
 	{"rejudge", "re-classify groups against those runtimes"},
 	{"plan", "choose the keeper in every group"},
 	{"apply", "union metadata onto the keeper, quarantine the losers"},
@@ -79,6 +80,7 @@ Run the commands in the order below.`,
 	root.AddCommand(newSyncCmd())
 	root.AddCommand(newScanCmd())
 	root.AddCommand(newCanonCmd())
+	root.AddCommand(newIdentifyCmd())
 	root.AddCommand(newRejudgeCmd())
 	root.AddCommand(newPlanCmd())
 	root.AddCommand(newApplyCmd())
