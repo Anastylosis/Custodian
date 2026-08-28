@@ -18,7 +18,9 @@ func TestFormatStatsNeverSynced(t *testing.T) {
 		"without stash_id:  0\n" +
 		"files no phash:    0\n" +
 		"bytes on disk:     0 B\n" +
-		"duplicate groups:  0 (certain 0, conflicted 0, dismissed 0)\n" +
+		"duplicate groups:  0 (certain 0, conflicted 0, dismissed 0, partial 0, mistag 0)\n" +
+		"partial:           0 (0 B)\n" +
+		"mistag:            0\n" +
 		"reclaimable:       0 B\n" +
 		"quarantined:       0 groups (0 B)\n" +
 		"reclaimed:         0 groups (0 B)\n" +
@@ -35,6 +37,7 @@ func TestFormatStatsWithLastRun(t *testing.T) {
 		ScenesWithMultipleFiles: 59, ScenesWithStashID: 28946, ScenesWithoutStashID: 32272,
 		BytesLive: 1 << 40, FilesWithoutPhash: 1400,
 		GroupsCertain: 843, GroupsConflicted: 410, GroupsDismissed: 2,
+		GroupsPartial: 5, PartialBytes: 6 << 30, GroupsMistag: 7,
 		ReclaimableBytes:  1<<40 + 1<<39, // 1.5 TiB
 		GroupsQuarantined: 12, QuarantinedBytes: 2 << 30,
 		GroupsReclaimed: 3, ReclaimedBytes: 4 << 30,
@@ -50,7 +53,9 @@ func TestFormatStatsWithLastRun(t *testing.T) {
 		"without stash_id:  32272",
 		"files no phash:    1400",
 		"bytes on disk:     1.00 TiB",
-		"duplicate groups:  1255 (certain 843, conflicted 410, dismissed 2)",
+		"duplicate groups:  1267 (certain 843, conflicted 410, dismissed 2, partial 5, mistag 7)",
+		"partial:           5 (6.00 GiB)",
+		"mistag:            7",
 		"reclaimable:       1.50 TiB",
 		"quarantined:       12 groups (2.00 GiB)",
 		"reclaimed:         3 groups (4.00 GiB)",

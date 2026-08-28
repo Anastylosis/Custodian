@@ -19,9 +19,12 @@ type Stats struct {
 	GroupsCertain           int
 	GroupsConflicted        int
 	GroupsDismissed         int
+	GroupsPartial           int
+	GroupsMistag            int
 	GroupsQuarantined       int
 	GroupsReclaimed         int
 	ReclaimableBytes        int64
+	PartialBytes            int64
 	QuarantinedBytes        int64
 	ReclaimedBytes          int64
 	LastSync                *Run // most recent full/incremental run
@@ -117,6 +120,17 @@ func (l *Ledger) statsGroups(ctx context.Context, st *Stats) error {
 		case VerdictDismissed:
 			st.GroupsDismissed = count
 			st.ReclaimableBytes += reclaimable
+		case VerdictPartial:
+			// A `partial` group's keeper (the matching copy) is chosen by
+			// `plan` exactly like a `certain` group's, so its losers'
+			// bytes count toward the same reclaimable total.
+			st.GroupsPartial = count
+			st.PartialBytes = reclaimable
+			st.ReclaimableBytes += reclaimable
+		case VerdictMistag:
+			// No move happens for a mistag group — apply only tags — so
+			// its bytes are not reclaimable and are not added to the total.
+			st.GroupsMistag = count
 		case VerdictQuarantined:
 			// Not counted as reclaimable: the bytes are still on disk, but
 			// they are spoken for — `prune` is what frees them.

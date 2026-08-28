@@ -8,12 +8,24 @@ import (
 	"time"
 )
 
-// Verdict values a policy can reach. partial/mistag/probable/rejected arrive
-// with later generators.
+// Verdict values a policy can reach. probable/rejected arrive with later
+// generators.
 const (
 	VerdictCertain    = "certain"
 	VerdictConflicted = "conflicted"
 	VerdictDismissed  = "dismissed"
+
+	// VerdictPartial is where evidence.Rejudge leaves a group when one
+	// scene matches its canonical duration and every other is materially
+	// shorter (REBUILD.md §4.2): a clip, trailer or split part. `plan`
+	// still chooses a keeper here, restricted to the matching copies.
+	VerdictPartial = "partial"
+
+	// VerdictMistag is where evidence.Rejudge leaves a group when a scene
+	// runs longer than its canonical, or the group's canonicals disagree
+	// with each other. The fix is metadata, not deletion: `apply` tags
+	// every scene in the group rather than quarantining any of them.
+	VerdictMistag = "mistag"
 
 	// VerdictQuarantined is where `apply` leaves a group: the losers are
 	// tagged and their files sit in the quarantine directory, still in
@@ -355,6 +367,43 @@ func (l *Ledger) SetOutcome(ctx context.Context, signature, verdict string, runI
 		verdict, nullIfZero(runID), signature)
 	if err != nil {
 		return fmt.Errorf("ledger: setting outcome %s for %s: %w", verdict, signature, err)
+	}
+	return nil
+}
+
+// UpdateVerdict is what evidence.Rejudge uses to move a group between
+// verdicts after `scan` already found it: it replaces the group's verdict,
+// reason and canonical_duration evidence, but leaves its scene membership,
+// keeper and other evidence (shared_stash_id, duration_spread) untouched —
+// unlike ReplaceGroups, which scan uses to rebuild the whole candidate set
+// from scratch every run.
+func (l *Ledger) UpdateVerdict(ctx context.Context, signature, verdict, reason string, evidence []Evidence) error {
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("ledger: beginning UpdateVerdict transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE candidate_group SET verdict = ?, reason = ? WHERE signature = ?`,
+		verdict, reason, signature); err != nil {
+		return fmt.Errorf("ledger: updating verdict for %s: %w", signature, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM candidate_evidence WHERE signature = ? AND generator = 'canonical_duration'`,
+		signature); err != nil {
+		return fmt.Errorf("ledger: clearing canonical_duration evidence for %s: %w", signature, err)
+	}
+	for _, e := range evidence {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO candidate_evidence(signature, generator, kind, detail, value) VALUES(?, ?, ?, ?, ?)`,
+			signature, e.Generator, e.Kind, e.Detail, nullableFloat(e.Value)); err != nil {
+			return fmt.Errorf("ledger: adding canonical_duration evidence to %s: %w", signature, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ledger: committing UpdateVerdict: %w", err)
 	}
 	return nil
 }

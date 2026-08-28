@@ -42,6 +42,24 @@ type Config struct {
 	StashBoxFingerprints StashBoxFingerprints `yaml:"stash_box_fingerprints"`
 	Merge                Merge                `yaml:"merge"`
 	Quarantine           Quarantine           `yaml:"quarantine"`
+	Sources              Sources              `yaml:"sources"`
+}
+
+// Sources configures where `custodian canon` looks for canonical durations
+// outside the local library (REBUILD.md §4.2, internal/canonical).
+type Sources struct {
+	// StashBoxEndpoint defaults `custodian canon --source stash-box` to one
+	// configured stash-box, when the server has more than one and --endpoint
+	// wasn't given.
+	StashBoxEndpoint string `yaml:"stash_box_endpoint"`
+	FSS              FSSSrc `yaml:"fss"`
+}
+
+// FSSSrc points at an FSS catalogue: its sqlite db, its JSON export
+// directory, or both.
+type FSSSrc struct {
+	DB      string `yaml:"db"`
+	JSONDir string `yaml:"json_dir"`
 }
 
 // Quarantine configures the reversible apply path (REBUILD.md §4.4): where
@@ -52,6 +70,10 @@ type Quarantine struct {
 	// library path, or moveFiles refuses to move anything there.
 	Dir string `yaml:"dir"`
 	Tag string `yaml:"tag"`
+	// MistagTag is put on every scene in a `mistag` group — REBUILD.md
+	// §4.2: the fix is metadata, not deletion, so apply tags rather than
+	// quarantines.
+	MistagTag string `yaml:"mistag_tag"`
 	// BackupDir is on the machine running custodian. Empty means
 	// ~/.local/share/custodian/backups.
 	BackupDir string `yaml:"backup_dir"`

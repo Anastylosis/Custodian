@@ -69,6 +69,8 @@ See PLAN.md for the full design.`,
 	root.AddCommand(newApplyCmd())
 	root.AddCommand(newPruneCmd())
 	root.AddCommand(newLogCmd())
+	root.AddCommand(newCanonCmd())
+	root.AddCommand(newRejudgeCmd())
 
 	return root
 }

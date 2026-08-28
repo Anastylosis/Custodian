@@ -63,6 +63,7 @@ func runApply(cmd *cobra.Command, _ []string) error {
 		QuarantineDir: pick(flagApplyQuarantine, cfg.Quarantine.Dir),
 		BackupDir:     pick(flagApplyBackupDir, cfg.Quarantine.BackupDir),
 		Tag:           cfg.Quarantine.Tag,
+		MistagTag:     cfg.Quarantine.MistagTag,
 		Commit:        flagApplyCommit,
 		Limit:         flagApplyLimit,
 	}
@@ -92,21 +93,26 @@ func runApply(cmd *cobra.Command, _ []string) error {
 // confirmApply reads the plan out of the ledger — no Stash calls — so the
 // YES gate can say how many groups and how many bytes are at stake.
 func confirmApply(ctx context.Context, cmd *cobra.Command, l *ledger.Ledger, limit int) (bool, error) {
-	groups, err := l.Groups(ctx, ledger.GroupFilter{Verdict: ledger.VerdictCertain})
-	if err != nil {
-		return false, err
-	}
 	var summary confirm.Summary
 	summary.Action = "quarantine"
-	for _, g := range groups {
-		if g.Keeper == "" {
-			continue
-		}
-		summary.GroupCount++
-		summary.SceneCount += len(g.SceneIDs) - 1
-		summary.ReclaimableBytes += g.Reclaimable
-		if limit > 0 && summary.GroupCount == limit {
+	for _, verdict := range []string{ledger.VerdictCertain, ledger.VerdictPartial} {
+		if limit > 0 && summary.GroupCount >= limit {
 			break
+		}
+		groups, err := l.Groups(ctx, ledger.GroupFilter{Verdict: verdict})
+		if err != nil {
+			return false, err
+		}
+		for _, g := range groups {
+			if g.Keeper == "" {
+				continue
+			}
+			summary.GroupCount++
+			summary.SceneCount += len(g.SceneIDs) - 1
+			summary.ReclaimableBytes += g.Reclaimable
+			if limit > 0 && summary.GroupCount == limit {
+				break
+			}
 		}
 	}
 	return confirm.PromptYES(cmd.InOrStdin(), cmd.OutOrStdout(), summary, flagApplyYes)

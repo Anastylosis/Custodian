@@ -51,6 +51,15 @@ func TestEmbeddedDefaultsParse(t *testing.T) {
 	if got, want := cfg.Scoring.Files.Rules[0], "filename_quality"; got != want {
 		t.Errorf("expected first file rule to be %q, got %q", want, got)
 	}
+	if got, want := cfg.Quarantine.MistagTag, "_custodian_mistag"; got != want {
+		t.Errorf("expected default quarantine.mistag_tag=%q, got %q", want, got)
+	}
+	if cfg.Sources.StashBoxEndpoint != "" {
+		t.Errorf("expected default sources.stash_box_endpoint to be empty, got %q", cfg.Sources.StashBoxEndpoint)
+	}
+	if cfg.Sources.FSS.DB != "" || cfg.Sources.FSS.JSONDir != "" {
+		t.Errorf("expected default sources.fss to be empty, got %+v", cfg.Sources.FSS)
+	}
 }
 
 // TestUserOverridesMergeOverDefaults verifies that user values replace

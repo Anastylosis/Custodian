@@ -14,8 +14,20 @@ type Report struct {
 	RunID         int64
 	QuarantineDir string
 	Tag           string
+	MistagTag     string
 	Backup        BackupStep
 	Groups        []GroupReport
+	Mistags       []MistagReport
+}
+
+// MistagReport is one `mistag` group's outcome: every scene tagged, no
+// files moved.
+type MistagReport struct {
+	Signature string
+	SceneIDs  []string
+	Reason    string
+	Tagged    bool
+	Err       string
 }
 
 // BackupStep is §4.4 step 1: the verified database backup no --commit run is
@@ -90,11 +102,30 @@ func (r Report) Counts() (done, skipped, failed int, bytes int64) {
 	return done, skipped, failed, bytes
 }
 
+// MistagCounts summarises the mistag tagging: groups tagged and groups that
+// failed.
+func (r Report) MistagCounts() (tagged, failed int) {
+	for _, m := range r.Mistags {
+		switch {
+		case m.Err != "":
+			failed++
+		case m.Tagged:
+			tagged++
+		}
+	}
+	return tagged, failed
+}
+
 // Summary is the one-line form recorded as the apply run's notes.
 func (r Report) Summary() string {
 	done, skipped, failed, bytes := r.Counts()
-	return fmt.Sprintf("quarantined %d, skipped %d, failed %d, %s",
+	s := fmt.Sprintf("quarantined %d, skipped %d, failed %d, %s",
 		done, skipped, failed, confirm.HumanBytes(bytes))
+	if len(r.Mistags) > 0 {
+		tagged, mistagFailed := r.MistagCounts()
+		s += fmt.Sprintf("; mistagged %d groups, failed %d", tagged, mistagFailed)
+	}
+	return s
 }
 
 // String renders the report as the plain text `custodian apply` prints.
@@ -118,6 +149,21 @@ func (r Report) String() string {
 	fmt.Fprintf(&b, "%s: %d groups, %s reclaimable once pruned\n", verb, done, confirm.HumanBytes(bytes))
 	fmt.Fprintf(&b, "skipped:    %d groups\n", skipped)
 	fmt.Fprintf(&b, "failed:     %d groups\n", failed)
+
+	if len(r.Mistags) > 0 {
+		b.WriteString("\nmistags:\n")
+		for _, m := range r.Mistags {
+			writeMistag(&b, m, r.MistagTag, r.DryRun)
+		}
+		tagged, mistagFailed := r.MistagCounts()
+		mistagVerb := "tagged"
+		if r.DryRun {
+			mistagVerb = "would tag"
+		}
+		fmt.Fprintf(&b, "%s: %d groups\n", mistagVerb, tagged)
+		fmt.Fprintf(&b, "failed:     %d groups\n", mistagFailed)
+	}
+
 	if r.DryRun {
 		b.WriteString("\nDRY RUN — nothing was sent to Stash, nothing moved on disk, and the\n")
 		b.WriteString("mutation log is untouched. Re-run with --commit to act on this plan.\n")
@@ -197,6 +243,14 @@ func writeLoser(b *strings.Builder, l LoserReport, dryRun bool) {
 	}
 	for _, n := range l.Notes {
 		fmt.Fprintf(b, "    note:    %s\n", n)
+	}
+}
+
+func writeMistag(b *strings.Builder, m MistagReport, tag string, dryRun bool) {
+	fmt.Fprintf(b, "group %s: %s %s to %d scenes (%s)\n",
+		shortSignature(m.Signature), verb(dryRun, "added", "would add"), tag, len(m.SceneIDs), m.Reason)
+	if m.Err != "" {
+		fmt.Fprintf(b, "  ERROR: %s\n", m.Err)
 	}
 }
 

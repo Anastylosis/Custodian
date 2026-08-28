@@ -238,3 +238,72 @@ func TestNormalizeCodecMapsH265ToHEVC(t *testing.T) {
 		t.Errorf("normalizeCodec(HEVC) = %q, want hevc", got)
 	}
 }
+
+// TestChooseEligibleSingleScenePicksItDirectly is the `partial` group case
+// where exactly one scene matched its canonical duration: Choose must pick
+// it without running the quality chain against the shorter loser.
+func TestChooseEligibleSingleScenePicksItDirectly(t *testing.T) {
+	files := map[string]ledger.PrimaryFile{
+		"complete": {Width: 1280, Height: 720, BitRate: 2_000_000, VideoCodec: "h264", Size: 500_000},
+		"clip":     {Width: 1920, Height: 1080, BitRate: 20_000_000, VideoCodec: "hevc", Size: 5_000_000},
+	}
+	rules := DefaultRules()
+	rules.Eligible = []string{"complete"}
+
+	got := Choose(group("complete", "clip"), files, rules)
+	if got.Keeper != "complete" {
+		t.Fatalf("Keeper = %q, want complete (the only eligible scene, despite lower quality)", got.Keeper)
+	}
+	if !reflect.DeepEqual(got.Losers, []string{"clip"}) {
+		t.Fatalf("Losers = %v, want [clip]", got.Losers)
+	}
+	if len(got.Steps) != 1 || got.Steps[0].Rule != "completeness" {
+		t.Fatalf("Steps = %+v, want a single completeness step", got.Steps)
+	}
+}
+
+// TestChooseEligibleRestrictsQualityChainToTheCompleteCopies covers several
+// scenes matching canonical: Choose still runs tier/bitrate/... but only
+// among the eligible pool, and the completeness step leads.
+func TestChooseEligibleRestrictsQualityChainToTheCompleteCopies(t *testing.T) {
+	files := map[string]ledger.PrimaryFile{
+		"a":       {Width: 1920, Height: 1080, BitRate: 5_000_000, VideoCodec: "hevc", Size: 1_000_000},
+		"b":       {Width: 1280, Height: 720, BitRate: 5_000_000, VideoCodec: "hevc", Size: 1_000_000},
+		"partial": {Width: 3840, Height: 2160, BitRate: 50_000_000, VideoCodec: "av1", Size: 9_000_000},
+	}
+	rules := DefaultRules()
+	rules.Eligible = []string{"a", "b"}
+
+	got := Choose(group("a", "b", "partial"), files, rules)
+	if got.Keeper != "a" {
+		t.Fatalf("Keeper = %q, want a (best tier among the eligible pair)", got.Keeper)
+	}
+	if !reflect.DeepEqual(got.Losers, []string{"b", "partial"}) {
+		t.Fatalf("Losers = %v, want [b partial] — the incomplete scene is still a loser", got.Losers)
+	}
+	if got.Steps[0].Rule != "completeness" {
+		t.Fatalf("Steps[0] = %+v, want the completeness step first", got.Steps[0])
+	}
+	last := got.Steps[len(got.Steps)-1]
+	if last.Rule != "tier" || last.Outcome != "a wins" {
+		t.Errorf("deciding step = %+v, want tier/a wins", last)
+	}
+}
+
+// TestChooseEmptyEligibleFallsBackToWholeGroup guards the defensive branch:
+// an Eligible list that matches nothing in the group (a bug upstream, not a
+// case Rejudge should ever produce) must not leave Choose with no pool to
+// pick from.
+func TestChooseEmptyEligibleFallsBackToWholeGroup(t *testing.T) {
+	files := map[string]ledger.PrimaryFile{
+		"9904": {Width: 1920, Height: 1080, BitRate: 5_000_000, VideoCodec: "hevc", Size: 1_000_000},
+		"9905": {Width: 1280, Height: 720, BitRate: 5_000_000, VideoCodec: "hevc", Size: 1_000_000},
+	}
+	rules := DefaultRules()
+	rules.Eligible = []string{"not-in-group"}
+
+	got := Choose(group("9904", "9905"), files, rules)
+	if got.Keeper != "9904" {
+		t.Fatalf("Keeper = %q, want 9904 (fell back to the whole group)", got.Keeper)
+	}
+}

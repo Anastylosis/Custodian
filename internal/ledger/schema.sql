@@ -183,3 +183,21 @@ CREATE TABLE IF NOT EXISTS candidate_step (
   detail    TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(signature, ord)
 );
+
+-- A scene's true runtime as reported by an external authority — a
+-- stash-box (scrapeMultiScenes) or an FSS catalogue — fetched by
+-- `custodian canon` and consumed by evidence.Rejudge (REBUILD.md §4.2's
+-- canonical_duration generator). Keyed so a scene can carry one row per
+-- source per origin without clobbering another source's answer.
+CREATE TABLE IF NOT EXISTS canonical (
+  scene_id    TEXT NOT NULL,
+  source      TEXT NOT NULL,             -- 'stash-box' | 'fss'
+  origin      TEXT NOT NULL,             -- endpoint URL or catalogue path
+  duration    REAL NOT NULL,
+  title       TEXT NOT NULL DEFAULT '',
+  matched_by  TEXT NOT NULL DEFAULT '',
+  fetched_run INTEGER NOT NULL,
+  PRIMARY KEY(scene_id, source, origin)
+);
+
+CREATE INDEX IF NOT EXISTS idx_canonical_scene ON canonical(scene_id);

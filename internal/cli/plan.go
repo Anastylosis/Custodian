@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Anastylosis/Custodian/internal/confirm"
+	"github.com/Anastylosis/Custodian/internal/evidence"
 	"github.com/Anastylosis/Custodian/internal/keeper"
 	"github.com/Anastylosis/Custodian/internal/ledger"
 	stash "github.com/Anastylosis/stash-go"
@@ -22,7 +23,9 @@ var (
 
 // planRuleOrder is internal/keeper's rule chain order, so the histogram
 // reads the same way the rules run rather than in map-iteration order.
-var planRuleOrder = []string{"tier", "bitrate", "codec", "size", "location", "scene_id"}
+// "completeness" leads a `partial` group's Steps but is never itself the
+// last (deciding) step unless it was the group's only eligible scene.
+var planRuleOrder = []string{"tier", "bitrate", "codec", "size", "location", "scene_id", "completeness"}
 
 func newPlanCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -36,7 +39,7 @@ Pure and read-only against Stash — plan never calls Stash and never writes a
 file. "apply" (later) is what acts on this plan.`,
 		RunE: runPlan,
 	}
-	cmd.Flags().StringVar(&flagPlanVerdict, "verdict", ledger.VerdictCertain, "verdict to plan: certain, conflicted, dismissed")
+	cmd.Flags().StringVar(&flagPlanVerdict, "verdict", ledger.VerdictCertain, "verdict to plan: certain, conflicted, dismissed, partial")
 	cmd.Flags().BoolVar(&flagPlanJSON, "json", false, "emit the planned groups as JSON")
 	cmd.Flags().IntVar(&flagPlanLimit, "limit", 0, "limit the number of groups planned (0 = no limit)")
 	cmd.Flags().StringVar(&flagPlanLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
@@ -89,7 +92,11 @@ func choose(ctx context.Context, l *ledger.Ledger, groups []ledger.Group, files 
 	var total int64
 
 	for i := range groups {
-		c := keeper.Choose(groups[i], files, rules)
+		gr := rules
+		if groups[i].Verdict == ledger.VerdictPartial {
+			gr.Eligible = evidence.CompleteSceneIDs(groups[i])
+		}
+		c := keeper.Choose(groups[i], files, gr)
 
 		var reclaimable int64
 		for _, loser := range c.Losers {

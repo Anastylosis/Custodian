@@ -23,6 +23,10 @@ import (
 const (
 	DefaultQuarantineDir = "/data/_quarantine"
 	DefaultTag           = "_custodian_quarantine"
+	// DefaultMistagTag marks every scene in a `mistag` group — REBUILD.md
+	// §4.2: the fix is metadata, not deletion, so apply tags rather than
+	// quarantining any of them.
+	DefaultMistagTag = "_custodian_mistag"
 )
 
 // Options configures Apply. The zero value is a dry run with the defaults
@@ -38,6 +42,10 @@ type Options struct {
 	// Tag is put on every loser scene so quarantine can be reviewed, watched
 	// and rescued from Stash's own UI.
 	Tag string
+	// MistagTag is put on every scene in a `mistag` group — no file moves,
+	// just a tag: the group's problem is its metadata, not a duplicate to
+	// resolve.
+	MistagTag string
 	// Commit sends the mutations. Without it nothing is written anywhere.
 	Commit bool
 	// Limit caps how many groups are acted on (0 = no limit).
@@ -53,6 +61,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Tag == "" {
 		o.Tag = DefaultTag
+	}
+	if o.MistagTag == "" {
+		o.MistagTag = DefaultMistagTag
 	}
 	if o.BackupDir == "" {
 		o.BackupDir = DefaultBackupDir()
@@ -72,8 +83,9 @@ func DefaultBackupDir() string {
 	return filepath.Join(home, ".local", "share", "custodian", "backups")
 }
 
-// Apply quarantines the losers of every live `certain` group that `plan` has
-// chosen a keeper for, in the order REBUILD.md §4.4 lays down. Without
+// Apply quarantines the losers of every live `certain` or `partial` group
+// that `plan` has chosen a keeper for, and tags every scene in a live
+// `mistag` group, in the order REBUILD.md §4.4 lays down. Without
 // Options.Commit it computes and reports the whole plan and sends nothing.
 func Apply(ctx context.Context, client *stash.Client, l *ledger.Ledger, opts Options) (Report, error) {
 	if client == nil || l == nil {
@@ -81,7 +93,7 @@ func Apply(ctx context.Context, client *stash.Client, l *ledger.Ledger, opts Opt
 	}
 	opts = opts.withDefaults()
 
-	rep := Report{DryRun: !opts.Commit, QuarantineDir: opts.QuarantineDir, Tag: opts.Tag}
+	rep := Report{DryRun: !opts.Commit, QuarantineDir: opts.QuarantineDir, Tag: opts.Tag, MistagTag: opts.MistagTag}
 	rep.Backup.Dir = opts.BackupDir
 
 	groups, err := plannedGroups(ctx, l, opts.Limit)
@@ -89,6 +101,10 @@ func Apply(ctx context.Context, client *stash.Client, l *ledger.Ledger, opts Opt
 		return rep, err
 	}
 	files, err := l.PrimaryFiles(ctx, sceneIDsOf(groups))
+	if err != nil {
+		return rep, err
+	}
+	mistags, err := mistagGroups(ctx, l, opts.Limit)
 	if err != nil {
 		return rep, err
 	}
@@ -102,7 +118,7 @@ func Apply(ctx context.Context, client *stash.Client, l *ledger.Ledger, opts Opt
 		a.runID, rep.RunID = runID, runID
 	}
 
-	err = a.run(ctx, &rep, groups, files)
+	err = a.run(ctx, &rep, groups, files, mistags)
 	if a.runID != 0 {
 		_ = l.FinishRun(ctx, a.runID, ledger.RunSummary{Notes: rep.Summary()})
 	}
@@ -110,23 +126,27 @@ func Apply(ctx context.Context, client *stash.Client, l *ledger.Ledger, opts Opt
 }
 
 // applier carries the state one Apply run accumulates: the run it logs
-// under, the tag it ensured once, and the quarantine basenames it has
+// under, the tags it ensured once, and the quarantine basenames it has
 // already claimed.
 type applier struct {
-	client *stash.Client
-	l      *ledger.Ledger
-	opts   Options
-	runID  int64
-	tagID  string
-	used   map[string]bool
+	client      *stash.Client
+	l           *ledger.Ledger
+	opts        Options
+	runID       int64
+	tagID       string
+	mistagTagID string
+	used        map[string]bool
 }
 
-func (a *applier) run(ctx context.Context, rep *Report, groups []ledger.Group, files map[string]ledger.PrimaryFile) error {
+func (a *applier) run(ctx context.Context, rep *Report, groups []ledger.Group, files map[string]ledger.PrimaryFile, mistags []ledger.Group) error {
 	if err := a.backup(ctx, rep); err != nil {
 		return err
 	}
 	for _, g := range groups {
 		rep.Groups = append(rep.Groups, a.group(ctx, g, files))
+	}
+	for _, g := range mistags {
+		rep.Mistags = append(rep.Mistags, a.mistag(ctx, g))
 	}
 	return nil
 }
@@ -426,12 +446,19 @@ func (a *applier) do(ctx context.Context, m ledger.Mutation, send func() error) 
 	return a.l.MarkMutation(ctx, id, true, "")
 }
 
-// plannedGroups returns the live `certain` groups `plan` has chosen a keeper
-// for, capped at limit.
+// plannedGroups returns the live `certain` and `partial` groups `plan` has
+// chosen a keeper for, capped at limit. `partial` is treated exactly like
+// `certain` here (REBUILD.md §4.2): its keeper is already the matching
+// copy plan chose among the complete scenes, so the rest of Apply doesn't
+// need to know which verdict got it there.
 func plannedGroups(ctx context.Context, l *ledger.Ledger, limit int) ([]ledger.Group, error) {
-	all, err := l.Groups(ctx, ledger.GroupFilter{Verdict: ledger.VerdictCertain})
-	if err != nil {
-		return nil, err
+	var all []ledger.Group
+	for _, v := range []string{ledger.VerdictCertain, ledger.VerdictPartial} {
+		gs, err := l.Groups(ctx, ledger.GroupFilter{Verdict: v})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, gs...)
 	}
 	out := make([]ledger.Group, 0, len(all))
 	for _, g := range all {
@@ -444,6 +471,57 @@ func plannedGroups(ctx context.Context, l *ledger.Ledger, limit int) ([]ledger.G
 		}
 	}
 	return out, nil
+}
+
+// mistagGroups returns the live `mistag` groups, capped at limit. Unlike
+// plannedGroups these have no keeper — every scene in the group gets the
+// mistag tag, not just the losers.
+func mistagGroups(ctx context.Context, l *ledger.Ledger, limit int) ([]ledger.Group, error) {
+	all, err := l.Groups(ctx, ledger.GroupFilter{Verdict: ledger.VerdictMistag})
+	if err != nil {
+		return nil, err
+	}
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
+}
+
+// mistag tags every scene in g with opts.MistagTag — no file move, no
+// keeper: the group's problem is metadata, and the fix is the tag showing
+// up for review in Stash's UI.
+func (a *applier) mistag(ctx context.Context, g ledger.Group) MistagReport {
+	mr := MistagReport{Signature: g.Signature, SceneIDs: g.SceneIDs, Reason: g.Reason}
+
+	err := a.do(ctx, ledger.Mutation{
+		Kind:   "tag",
+		Target: fmt.Sprintf("group %s (%d scenes)", g.Signature, len(g.SceneIDs)),
+		To:     a.opts.MistagTag, Note: "bulkSceneUpdate ADD",
+	}, func() error {
+		tagID, err := a.ensureMistagTag(ctx)
+		if err != nil {
+			return err
+		}
+		return a.client.AddSceneTags(ctx, []string{tagID}, g.SceneIDs...)
+	})
+	if err != nil {
+		mr.Err = err.Error()
+		return mr
+	}
+	mr.Tagged = true
+	return mr
+}
+
+func (a *applier) ensureMistagTag(ctx context.Context) (string, error) {
+	if a.mistagTagID != "" {
+		return a.mistagTagID, nil
+	}
+	id, err := a.client.EnsureTag(ctx, a.opts.MistagTag)
+	if err != nil {
+		return "", fmt.Errorf("reclaim: ensuring tag %s: %w", a.opts.MistagTag, err)
+	}
+	a.mistagTagID = id
+	return id, nil
 }
 
 func sceneIDsOf(groups []ledger.Group) []string {

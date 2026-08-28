@@ -519,3 +519,167 @@ func containsSubstring(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// seedMistagGroup writes the given scenes and one `mistag` candidate_group
+// holding them — no keeper, since apply's mistag path tags every scene
+// rather than choosing one.
+func seedMistagGroup(t *testing.T, l *ledger.Ledger, signature, reason string, scenes ...stash.Scene) {
+	t.Helper()
+	ctx := t.Context()
+	runID, err := l.BeginRun(ctx, "full", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.UpsertScenes(ctx, runID, scenes); err != nil {
+		t.Fatalf("UpsertScenes: %v", err)
+	}
+	ids := make([]string, len(scenes))
+	for i, sc := range scenes {
+		ids[i] = sc.ID
+	}
+	if err := l.ReplaceGroups(ctx, runID, []ledger.Group{
+		{Signature: signature, SceneIDs: ids, Verdict: ledger.VerdictMistag, Reason: reason},
+	}); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+}
+
+func TestMistagDryRunSendsNoMutationsAndShowsThePlan(t *testing.T) {
+	scenes := []stash.Scene{scene("20", "/data/a.mp4", 1<<30), scene("21", "/data/b.mp4", 1<<30)}
+	f, c := newFakeStash(t, scenes...)
+	l := newLedger(t)
+	seedMistagGroup(t, l, "sig-mistag", "20: 1400s vs canonical 1000s", scenes...)
+
+	rep, err := Apply(t.Context(), c, l, Options{})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if got := f.writes(); len(got) != 0 {
+		t.Errorf("a dry run sent mutations: %v", got)
+	}
+	if len(rep.Mistags) != 1 {
+		t.Fatalf("Mistags = %+v, want 1 entry", rep.Mistags)
+	}
+	m := rep.Mistags[0]
+	if len(m.SceneIDs) != 2 {
+		t.Errorf("SceneIDs = %v, want both scenes", m.SceneIDs)
+	}
+
+	out := rep.String()
+	for _, want := range []string{"mistags:", "would add", "_custodian_mistag", "20: 1400s vs canonical 1000s"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plan is missing %q:\n%s", want, out)
+		}
+	}
+	assertVerdict(t, l, "sig-mistag", ledger.VerdictMistag)
+}
+
+func TestMistagCommitTagsEveryScene(t *testing.T) {
+	scenes := []stash.Scene{scene("20", "/data/a.mp4", 1<<30), scene("21", "/data/b.mp4", 1<<30)}
+	f, c := newFakeStash(t, scenes...)
+	l := newLedger(t)
+	seedMistagGroup(t, l, "sig-mistag", "sources disagree", scenes...)
+
+	rep, err := Apply(t.Context(), c, l, Options{Commit: true, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(rep.Mistags) != 1 || !rep.Mistags[0].Tagged {
+		t.Fatalf("Mistags = %+v, want it tagged", rep.Mistags)
+	}
+
+	want := []string{"backupDatabase", "tagCreate", "bulkSceneUpdate"}
+	if got := f.writes(); !slices.Equal(got, want) {
+		t.Fatalf("writes = %v, want %v (no moveFiles or sceneUpdate — mistag never moves)", got, want)
+	}
+
+	bulk, _ := f.input(t, "bulkSceneUpdate", 0)["input"].(map[string]any)
+	ids, _ := bulk["ids"].([]any)
+	if len(ids) != 2 {
+		t.Errorf("bulkSceneUpdate ids = %v, want both scenes", bulk["ids"])
+	}
+
+	if kinds := mutationKinds(t, l); !slices.Equal(kinds, []string{"backup", "tag"}) {
+		t.Errorf("mutation log = %v", kinds)
+	}
+	// A mistag group's verdict is not moved by apply — the fix is metadata,
+	// not a state transition.
+	assertVerdict(t, l, "sig-mistag", ledger.VerdictMistag)
+	assertAllOK(t, l)
+}
+
+func TestMistagCommitReusesAnExistingTag(t *testing.T) {
+	scenes := []stash.Scene{scene("20", "/data/a.mp4", 1<<30)}
+	f, c := newFakeStash(t, scenes...)
+	f.tagExists = true
+	l := newLedger(t)
+	seedMistagGroup(t, l, "sig-mistag", "x", scenes...)
+
+	if _, err := Apply(t.Context(), c, l, Options{Commit: true, BackupDir: t.TempDir()}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if slices.Contains(f.writes(), "tagCreate") {
+		t.Errorf("an existing tag was created again: %v", f.writes())
+	}
+}
+
+func TestMistagCommitFailureIsReportedNotFatal(t *testing.T) {
+	scenes := []stash.Scene{scene("20", "/data/a.mp4", 1<<30)}
+	f, c := newFakeStash(t, scenes...)
+	f.failOn["bulkSceneUpdate"] = "boom"
+	l := newLedger(t)
+	seedMistagGroup(t, l, "sig-mistag", "x", scenes...)
+
+	rep, err := Apply(t.Context(), c, l, Options{Commit: true, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Apply should not fail the whole run over one mistag group: %v", err)
+	}
+	if len(rep.Mistags) != 1 || rep.Mistags[0].Err == "" {
+		t.Fatalf("Mistags = %+v, want an error recorded", rep.Mistags)
+	}
+	tagged, failed := rep.MistagCounts()
+	if tagged != 0 || failed != 1 {
+		t.Errorf("MistagCounts() = %d, %d, want 0, 1", tagged, failed)
+	}
+}
+
+func TestPlannedGroupsIncludesPartialAlongsideCertain(t *testing.T) {
+	certainScenes := []stash.Scene{scene("10", "/data/keep/best.mp4", 4<<30), scene("11", "/data/tmp/worse.mp4", 2<<30)}
+	partialScenes := []stash.Scene{scene("30", "/data/keep/complete.mp4", 3<<30), scene("31", "/data/tmp/clip.mp4", 1<<30)}
+	all := append(append([]stash.Scene{}, certainScenes...), partialScenes...)
+	_, c := newFakeStash(t, all...)
+	l := newLedger(t)
+
+	// Both groups have to arrive in the same ReplaceGroups call: it
+	// tombstones any candidate_group an earlier run left out.
+	ctx := t.Context()
+	runID, err := l.BeginRun(ctx, "full", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.UpsertScenes(ctx, runID, all); err != nil {
+		t.Fatalf("UpsertScenes: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, []ledger.Group{
+		{Signature: "sig-certain", SceneIDs: []string{"10", "11"}, Verdict: ledger.VerdictCertain, Reason: "x"},
+		{Signature: "sig-partial", SceneIDs: []string{"30", "31"}, Verdict: ledger.VerdictPartial, Reason: "x"},
+	}); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+	if err := l.SetChoice(ctx, "sig-certain", "10", []string{"11"}, nil); err != nil {
+		t.Fatalf("SetChoice (certain): %v", err)
+	}
+	if err := l.SetChoice(ctx, "sig-partial", "30", []string{"31"}, nil); err != nil {
+		t.Fatalf("SetChoice (partial): %v", err)
+	}
+
+	rep, err := Apply(t.Context(), c, l, Options{Commit: true, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(rep.Groups) != 2 {
+		t.Fatalf("Groups = %+v, want both the certain and the partial group processed", rep.Groups)
+	}
+	assertVerdict(t, l, "sig-certain", ledger.VerdictQuarantined)
+	assertVerdict(t, l, "sig-partial", ledger.VerdictQuarantined)
+}

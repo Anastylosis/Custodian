@@ -47,6 +47,15 @@ type Rules struct {
 	// location tiebreak. Nil falls back to "does not start with a
 	// StagingPrefixes prefix".
 	Filed func(path string) bool
+
+	// Eligible restricts Choose's keeper pool to these scene ids — the
+	// completeness rule for a `partial` group (REBUILD.md §4.3):
+	// completeness sits above the quality chain, so only copies that
+	// matched their canonical duration compete on tier/bitrate/codec/size.
+	// Every group member not in Eligible is still a loser. Nil or empty
+	// means every scene is eligible, Choose's behaviour for `certain`
+	// groups.
+	Eligible []string
 }
 
 // DefaultRules is REBUILD.md §4.3's starting point.
@@ -78,9 +87,12 @@ func hasStagingPrefix(path string, prefixes []string) bool {
 // codec, size, filed location, older scene id (final, always decides) —
 // pairwise over every scene. Every scene but the keeper is a loser.
 //
-// Completeness is not a rule here: phase 2 only sends `certain` groups,
-// whose durations already agree within tolerance, so every member is a
-// candidate on quality alone.
+// Completeness is not a rule among those: for a `certain` group, whose
+// durations already agree within tolerance, every member is a candidate on
+// quality alone (r.Eligible nil). For a `partial` group, the caller sets
+// r.Eligible to the scenes that matched their canonical duration (§4.3):
+// only those compete on the chain above, a leading "completeness" Step
+// records which ones, and every scene outside Eligible is still a loser.
 func Choose(g ledger.Group, files map[string]ledger.PrimaryFile, r Rules) Choice {
 	ids := g.SceneIDs
 	if len(ids) == 0 {
@@ -94,14 +106,30 @@ func Choose(g ledger.Group, files map[string]ledger.PrimaryFile, r Rules) Choice
 		r.Filed = filedFunc(prefixes)
 	}
 
-	best := ids[0]
+	pool := ids
+	var completeness *Step
+	if len(r.Eligible) > 0 {
+		if restricted := filterEligible(ids, r.Eligible); len(restricted) > 0 {
+			pool = restricted
+		}
+		completeness = &Step{
+			Rule:    "completeness",
+			Outcome: fmt.Sprintf("eligible: %s", strings.Join(pool, ", ")),
+			Detail:  fmt.Sprintf("%d of %d scenes match canonical duration", len(pool), len(ids)),
+		}
+	}
+
+	best := pool[0]
 	var steps []Step
-	for _, challenger := range ids[1:] {
+	for _, challenger := range pool[1:] {
 		winner, cmpSteps := compare(best, challenger, files, r)
 		steps = cmpSteps
 		if winner == challenger {
 			best = challenger
 		}
+	}
+	if completeness != nil {
+		steps = append([]Step{*completeness}, steps...)
 	}
 
 	losers := make([]string, 0, len(ids)-1)
@@ -111,6 +139,22 @@ func Choose(g ledger.Group, files map[string]ledger.PrimaryFile, r Rules) Choice
 		}
 	}
 	return Choice{Keeper: best, Losers: losers, Steps: steps}
+}
+
+// filterEligible returns the subset of ids that appears in eligible,
+// preserving ids' order.
+func filterEligible(ids, eligible []string) []string {
+	set := make(map[string]bool, len(eligible))
+	for _, id := range eligible {
+		set[id] = true
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if set[id] {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // compare runs the rule chain between aID and bID and returns the winning

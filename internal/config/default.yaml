@@ -373,6 +373,30 @@ quarantine:
   # Put on every loser scene. Search for it in Stash to review quarantine.
   tag: _custodian_quarantine
 
+  # Put on every scene in a `mistag` group (REBUILD.md §4.2): the fix there
+  # is metadata, not deletion, so apply tags instead of quarantining.
+  mistag_tag: _custodian_mistag
+
   # Where the verified database backup goes before any --commit run. Empty
   # means ~/.local/share/custodian/backups.
   backup_dir: ""
+
+# === Canonical durations (REBUILD.md §4.2) ===
+#
+# `custodian canon` fetches a scene's true runtime from an authority outside
+# the local library, so `custodian rejudge` can tell a trimmed copy from a
+# clip from a mis-tag. Both a stash-box and an FSS catalogue are optional;
+# configure whichever you have.
+sources:
+  # Which configured stash-box `canon --source stash-box` asks when
+  # --endpoint is not given. Leave empty and pass --endpoint explicitly if
+  # the server has more than one stash-box configured.
+  stash_box_endpoint: ""
+
+  fss:
+    # FSS's sqlite database (see fss/docs/usage.md). Leave empty to read
+    # only the JSON export directory below.
+    db: ""
+    # A directory of FSS's *.json exports, one file per studio. Leave empty
+    # to read only the sqlite database above. Both may be set.
+    json_dir: ""

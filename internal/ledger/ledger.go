@@ -17,7 +17,7 @@ import (
 var schemaSQL string
 
 // currentSchemaVersion is the schema version this build knows how to apply.
-const currentSchemaVersion = 4
+const currentSchemaVersion = 5
 
 // Ledger wraps a database/sql connection to the ledger's SQLite file.
 type Ledger struct {

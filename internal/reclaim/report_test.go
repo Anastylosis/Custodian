@@ -67,6 +67,49 @@ func TestReportRendersEveryLoserDetail(t *testing.T) {
 	}
 }
 
+func TestReportRendersMistagsSection(t *testing.T) {
+	rep := Report{
+		MistagTag: "_custodian_mistag",
+		Mistags: []MistagReport{
+			{Signature: "abcdef0123456789", SceneIDs: []string{"1", "2"}, Reason: "sources disagree", Tagged: true},
+			{Signature: "fedcba9876543210", SceneIDs: []string{"3"}, Reason: "3: 1400s vs canonical 1000s", Err: "bulkSceneUpdate failed"},
+		},
+	}
+	out := rep.String()
+	for _, want := range []string{
+		"mistags:",
+		"group abcdef012345…: added _custodian_mistag to 2 scenes (sources disagree)",
+		"group fedcba987654…: added _custodian_mistag to 1 scenes (3: 1400s vs canonical 1000s)",
+		"ERROR: bulkSceneUpdate failed",
+		"tagged: 1 groups",
+		"failed:     1 groups",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report is missing %q:\n%s", want, out)
+		}
+	}
+	if tagged, failed := rep.MistagCounts(); tagged != 1 || failed != 1 {
+		t.Errorf("MistagCounts() = %d, %d, want 1, 1", tagged, failed)
+	}
+	if !strings.Contains(rep.Summary(), "mistagged 1 groups, failed 1") {
+		t.Errorf("Summary() = %q", rep.Summary())
+	}
+}
+
+func TestReportDryRunMistagsSayWouldTag(t *testing.T) {
+	rep := Report{
+		DryRun: true, MistagTag: "_custodian_mistag",
+		Mistags: []MistagReport{{Signature: "sig", SceneIDs: []string{"1"}, Reason: "x"}},
+	}
+	out := rep.String()
+	if !strings.Contains(out, "would add _custodian_mistag") {
+		t.Errorf("report:\n%s", out)
+	}
+	if !strings.Contains(out, "would tag: 0 groups") {
+		t.Errorf("report:\n%s", out)
+	}
+}
+
 func TestReportShowsAnUntakenBackupOnACommit(t *testing.T) {
 	rep := Report{Backup: BackupStep{Dir: "/b"}}
 	if !strings.Contains(rep.String(), "backup:     not taken") {
