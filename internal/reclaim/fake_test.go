@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -62,6 +63,15 @@ func newFakeStash(t *testing.T, scenes ...stash.Scene) (*fakeStash, *stash.Clien
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
 	return f, stash.NewClient(srv.URL)
+}
+
+// scene returns a snapshot of one scene as the fake currently holds it, for
+// assertions after a commit run mutated it.
+func (f *fakeStash) scene(id string) (stash.Scene, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sc, ok := f.scenes[id]
+	return sc, ok
 }
 
 // writes returns the names of the mutating operations only, in order.
@@ -134,6 +144,7 @@ func (f *fakeStash) serve(w http.ResponseWriter, r *http.Request) {
 func opOf(query string) string {
 	for _, probe := range []struct{ needle, op string }{
 		{"findScene(id:", "findScene"},
+		{"findScenes(filter:", "findScenes"},
 		{"sceneUpdate(input:", "sceneUpdate"},
 		{"tag_filter: { aliases:", "findTagsByAlias"},
 		{"findTags(tag_filter:", "findTags"},
@@ -169,11 +180,16 @@ func (f *fakeStash) answer(op string, vars map[string]any) string {
 	case "tagCreate":
 		return fmt.Sprintf(`{"data":{"tagCreate":{"id":%q}}}`, f.tagID)
 	case "sceneUpdate":
+		f.applySceneUpdate(vars)
 		return `{"data":{"sceneUpdate":{"id":"1"}}}`
 	case "bulkSceneUpdate":
+		f.applyBulkSceneUpdate(vars)
 		return `{"data":{"bulkSceneUpdate":[{"id":"1"}]}}`
 	case "moveFiles":
+		f.applyMoveFiles(vars)
 		return `{"data":{"moveFiles":true}}`
+	case "findScenes":
+		return f.findScenes(vars)
 	case "sceneMerge":
 		return `{"data":{"sceneMerge":{"id":"1"}}}`
 	case "deleteFiles":
@@ -191,6 +207,235 @@ func (f *fakeStash) answer(op string, vars map[string]any) string {
 	default:
 		return `{"data":{}}`
 	}
+}
+
+// applySceneUpdate mutates the fake's scene state the way a real Stash
+// sceneUpdate would, field by field, so a later findScene (or an Undo run
+// reading it back) sees what an earlier commit wrote.
+func (f *fakeStash) applySceneUpdate(vars map[string]any) {
+	input, _ := vars["input"].(map[string]any)
+	id, _ := input["id"].(string)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sc, ok := f.scenes[id]
+	if !ok {
+		return
+	}
+	if v, ok := input["title"].(string); ok {
+		sc.Title = v
+	}
+	if v, ok := input["code"].(string); ok {
+		sc.Code = v
+	}
+	if v, ok := input["date"].(string); ok {
+		sc.Date = v
+	}
+	if v, ok := input["details"].(string); ok {
+		sc.Details = v
+	}
+	if v, ok := input["director"].(string); ok {
+		sc.Director = v
+	}
+	if v, ok := input["organized"].(bool); ok {
+		sc.Organized = v
+	}
+	if v, ok := input["rating100"].(float64); ok {
+		r := int(v)
+		sc.Rating100 = &r
+	}
+	if v, ok := input["studio_id"].(string); ok {
+		if v == "" {
+			sc.Studio = nil
+		} else {
+			sc.Studio = &stash.Studio{ID: v}
+		}
+	}
+	if v, ok := input["urls"]; ok {
+		sc.URLs = toStrings(v)
+	}
+	if v, ok := input["tag_ids"]; ok {
+		sc.Tags = tagsOf(toStrings(v))
+	}
+	if v, ok := input["performer_ids"]; ok {
+		sc.Performers = performersOf(toStrings(v))
+	}
+	if v, ok := input["gallery_ids"]; ok {
+		sc.Galleries = galleriesOf(toStrings(v))
+	}
+	if v, ok := input["stash_ids"]; ok {
+		sc.StashIDs = stashIDsOf(v)
+	}
+	f.scenes[id] = sc
+}
+
+// applyBulkSceneUpdate mutates every named scene's tag list for an
+// AddSceneTags/RemoveSceneTags call (ADD/REMOVE mode).
+func (f *fakeStash) applyBulkSceneUpdate(vars map[string]any) {
+	input, _ := vars["input"].(map[string]any)
+	ids := toStrings(input["ids"])
+	tagField, ok := input["tag_ids"].(map[string]any)
+	if !ok {
+		return
+	}
+	tagIDs := toStrings(tagField["ids"])
+	mode, _ := tagField["mode"].(string)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, id := range ids {
+		sc, ok := f.scenes[id]
+		if !ok {
+			continue
+		}
+		switch mode {
+		case "ADD":
+			for _, tid := range tagIDs {
+				if !hasTagID(sc.Tags, tid) {
+					sc.Tags = append(sc.Tags, stash.Tag{ID: tid})
+				}
+			}
+		case "REMOVE":
+			sc.Tags = withoutTagIDs(sc.Tags, tagIDs)
+		}
+		f.scenes[id] = sc
+	}
+}
+
+// applyMoveFiles relocates every file named in a moveFiles call to the given
+// folder/basename, across whichever scene currently holds it.
+func (f *fakeStash) applyMoveFiles(vars map[string]any) {
+	input, _ := vars["input"].(map[string]any)
+	ids := toStrings(input["ids"])
+	folder, _ := input["destination_folder"].(string)
+	basename, _ := input["destination_basename"].(string)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for sceneID, sc := range f.scenes {
+		changed := false
+		for i := range sc.Files {
+			if !slices.Contains(ids, sc.Files[i].ID) {
+				continue
+			}
+			name := basename
+			if name == "" {
+				name = sc.Files[i].Basename
+			}
+			sc.Files[i].Path = strings.TrimRight(folder, "/") + "/" + name
+			sc.Files[i].Basename = name
+			changed = true
+		}
+		if changed {
+			f.scenes[sceneID] = sc
+		}
+	}
+}
+
+func toStrings(v any) []string {
+	list, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, e := range list {
+		if s, ok := e.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func tagsOf(ids []string) []stash.Tag {
+	out := make([]stash.Tag, len(ids))
+	for i, id := range ids {
+		out[i] = stash.Tag{ID: id}
+	}
+	return out
+}
+
+func performersOf(ids []string) []stash.Performer {
+	out := make([]stash.Performer, len(ids))
+	for i, id := range ids {
+		out[i] = stash.Performer{ID: id}
+	}
+	return out
+}
+
+func galleriesOf(ids []string) []stash.Gallery {
+	out := make([]stash.Gallery, len(ids))
+	for i, id := range ids {
+		out[i] = stash.Gallery{ID: id}
+	}
+	return out
+}
+
+func stashIDsOf(v any) []stash.StashID {
+	list, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]stash.StashID, 0, len(list))
+	for _, e := range list {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		endpoint, _ := m["endpoint"].(string)
+		id, _ := m["stash_id"].(string)
+		out = append(out, stash.StashID{Endpoint: endpoint, ID: id})
+	}
+	return out
+}
+
+func hasTagID(tags []stash.Tag, id string) bool {
+	for _, t := range tags {
+		if t.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func withoutTagIDs(tags []stash.Tag, ids []string) []stash.Tag {
+	out := tags[:0:0]
+	for _, t := range tags {
+		if !slices.Contains(ids, t.ID) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// findScenes answers Client.FindScenes's SceneFilter.PathContains query — the
+// only shape reclaim.Undo's checkFree sends — by scanning the fake's scenes
+// for a file path containing the requested substring.
+func (f *fakeStash) findScenes(vars map[string]any) string {
+	sceneFilter, _ := vars["scene_filter"].(map[string]any)
+	pathFilter, _ := sceneFilter["path"].(map[string]any)
+	needle, _ := pathFilter["value"].(string)
+
+	f.mu.Lock()
+	var matches []stash.Scene
+	if needle != "" {
+		for _, sc := range f.scenes {
+			for _, file := range sc.Files {
+				if strings.Contains(file.Path, needle) {
+					matches = append(matches, sc)
+					break
+				}
+			}
+		}
+	}
+	f.mu.Unlock()
+
+	b, err := json.Marshal(map[string]any{
+		"data": map[string]any{"findScenes": map[string]any{"count": len(matches), "scenes": matches}},
+	})
+	if err != nil {
+		return `{"data":{"findScenes":{"count":0,"scenes":[]}}}`
+	}
+	return string(b)
 }
 
 func (f *fakeStash) findScene(vars map[string]any) string {
@@ -237,6 +482,10 @@ func withTag(name string) func(*stash.Scene) {
 
 func withTitle(title string) func(*stash.Scene) {
 	return func(sc *stash.Scene) { sc.Title = title }
+}
+
+func withDirector(director string) func(*stash.Scene) {
+	return func(sc *stash.Scene) { sc.Director = director }
 }
 
 func baseOf(p string) string {

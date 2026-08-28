@@ -47,6 +47,11 @@ type PruneReport struct {
 	Tag    string
 	Backup BackupStep
 	Groups []PruneGroup
+	// ChangesFile is where the append-only changes JSON landed, beside the
+	// backup. Prune is not undoable — the verified backup is its reversal —
+	// but the entry still records what was merged and deleted.
+	ChangesFile string
+	ChangesErr  string
 }
 
 // PruneGroup is one quarantined group's outcome: the merge that folded its
@@ -117,6 +122,12 @@ func (r PruneReport) String() string {
 	fmt.Fprintf(&b, "%s: %d groups, %s freed\n", verb, done, confirm.HumanBytes(bytes))
 	fmt.Fprintf(&b, "skipped:   %d groups\n", skipped)
 	fmt.Fprintf(&b, "failed:    %d groups\n", failed)
+	switch {
+	case r.ChangesErr != "":
+		fmt.Fprintf(&b, "\nchanges JSON: FAILED — %s\n", r.ChangesErr)
+	case r.ChangesFile != "":
+		fmt.Fprintf(&b, "\nchanges JSON: %s\n", r.ChangesFile)
+	}
 	if r.DryRun {
 		b.WriteString("\nDRY RUN — nothing was merged, nothing was deleted, and the mutation\n")
 		b.WriteString("log is untouched. Re-run with --commit to act on this plan.\n")
@@ -212,7 +223,26 @@ func (p *pruner) run(ctx context.Context, rep *PruneReport, groups []ledger.Grou
 	for _, g := range groups {
 		rep.Groups = append(rep.Groups, p.group(ctx, g))
 	}
+	p.writeChanges(rep)
 	return nil
+}
+
+// writeChanges appends this run's entries to <backup file>.changes.json, the
+// same file Apply writes to. Prune is not undoable — the verified backup is
+// its reversal — but the record still says what merged and what was deleted.
+func (p *pruner) writeChanges(rep *PruneReport) {
+	if !p.opts.Commit || !rep.Backup.Taken {
+		return
+	}
+	path := rep.Backup.File + ".changes.json"
+	entries := pruneChangeEntries(*rep, time.Now().UTC().Format(time.RFC3339))
+	if err := writeChanges(path, entries); err != nil {
+		rep.ChangesErr = err.Error()
+		return
+	}
+	if len(entries) > 0 {
+		rep.ChangesFile = path
+	}
 }
 
 // backup is the same gate Apply has: a delete without a verified backup does

@@ -18,6 +18,11 @@ type Report struct {
 	Backup        BackupStep
 	Groups        []GroupReport
 	Mistags       []MistagReport
+	// ChangesFile is where the append-only changes JSON landed, beside the
+	// backup (REBUILD.md §4.4's Reversal paragraph). Empty on a dry run, or
+	// if ChangesErr explains why it could not be written.
+	ChangesFile string
+	ChangesErr  string
 }
 
 // MistagReport is one `mistag` group's outcome: every scene tagged, no
@@ -62,6 +67,11 @@ type UnionStep struct {
 	Scene     string
 	Fields    []string
 	Conflicts []string
+	// Before and After are the keeper's values for exactly the fields in
+	// Fields, pre- and post-union — what the mutation log and the changes
+	// JSON both record, and what `custodian undo` restores.
+	Before fieldSnapshot
+	After  fieldSnapshot
 }
 
 // LoserReport is one loser scene: the tag it took and the move its primary
@@ -162,6 +172,13 @@ func (r Report) String() string {
 		}
 		fmt.Fprintf(&b, "%s: %d groups\n", mistagVerb, tagged)
 		fmt.Fprintf(&b, "failed:     %d groups\n", mistagFailed)
+	}
+
+	switch {
+	case r.ChangesErr != "":
+		fmt.Fprintf(&b, "\nchanges JSON: FAILED — %s\n", r.ChangesErr)
+	case r.ChangesFile != "":
+		fmt.Fprintf(&b, "\nchanges JSON: %s\n", r.ChangesFile)
 	}
 
 	if r.DryRun {

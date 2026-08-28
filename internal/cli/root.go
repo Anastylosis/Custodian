@@ -68,6 +68,7 @@ See PLAN.md for the full design.`,
 	root.AddCommand(newPlanCmd())
 	root.AddCommand(newApplyCmd())
 	root.AddCommand(newPruneCmd())
+	root.AddCommand(newUndoCmd())
 	root.AddCommand(newLogCmd())
 	root.AddCommand(newCanonCmd())
 	root.AddCommand(newRejudgeCmd())

@@ -6,12 +6,14 @@ package reclaim
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Anastylosis/Custodian/internal/ledger"
 	"github.com/Anastylosis/Custodian/internal/pathmap"
@@ -148,7 +150,27 @@ func (a *applier) run(ctx context.Context, rep *Report, groups []ledger.Group, f
 	for _, g := range mistags {
 		rep.Mistags = append(rep.Mistags, a.mistag(ctx, g))
 	}
+	a.writeChanges(rep)
 	return nil
+}
+
+// writeChanges appends this run's entries to <backup file>.changes.json
+// (REBUILD.md §4.4's Reversal paragraph), once there is a verified backup to
+// put it beside. A dry run has neither a backup nor anything to reverse, so
+// it writes nothing.
+func (a *applier) writeChanges(rep *Report) {
+	if !a.opts.Commit || !rep.Backup.Taken {
+		return
+	}
+	path := rep.Backup.File + ".changes.json"
+	entries := changeEntriesFromReport(*rep, time.Now().UTC().Format(time.RFC3339))
+	if err := writeChanges(path, entries); err != nil {
+		rep.ChangesErr = err.Error()
+		return
+	}
+	if len(entries) > 0 {
+		rep.ChangesFile = path
+	}
 }
 
 // backup is §4.4 step 1. A commit run that cannot take a verified backup
@@ -293,23 +315,39 @@ func (a *applier) scene(ctx context.Context, id string, files map[string]ledger.
 }
 
 // union is §4.4 step 2: everything the losers know lands on the keeper
-// before they are taken out of the way.
+// before they are taken out of the way. The mutation logged carries the
+// keeper's before/after values as JSON (REBUILD.md §4.4's Reversal
+// paragraph) — what `custodian undo` reads back to restore them.
 func (a *applier) union(ctx context.Context, keeper *stash.Scene, losers []stash.Scene, gr *GroupReport) error {
 	update, conflicts := stash.Union(*keeper, losers, stash.DefaultUnionPolicy())
-	step := &UnionStep{Scene: keeper.ID, Fields: unionFields(update)}
+	fields := unionFields(update)
+	step := &UnionStep{
+		Scene: keeper.ID, Fields: fields,
+		Before: snapshotBefore(keeper, fields), After: snapshotAfter(update),
+	}
 	for _, c := range conflicts {
 		step.Conflicts = append(step.Conflicts,
 			fmt.Sprintf("%s: kept %s, dropped %s", c.Endpoint, c.Kept, c.Dropped))
 	}
 	gr.Union = step
 
-	if len(step.Fields) == 0 {
+	if len(fields) == 0 {
 		return nil
 	}
 	update.ID = keeper.ID
+
+	fromJSON, err := json.Marshal(step.Before)
+	if err != nil {
+		return fmt.Errorf("reclaim: encoding union before-state: %w", err)
+	}
+	toJSON, err := json.Marshal(step.After)
+	if err != nil {
+		return fmt.Errorf("reclaim: encoding union after-state: %w", err)
+	}
+
 	return a.do(ctx, ledger.Mutation{
 		Kind: "union", Target: "scene " + keeper.ID,
-		To: strings.Join(step.Fields, ", "), Note: "sceneUpdate",
+		From: string(fromJSON), To: string(toJSON), Note: "sceneUpdate",
 	}, func() error { return a.client.UpdateScene(ctx, update) })
 }
 
