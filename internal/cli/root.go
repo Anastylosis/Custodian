@@ -72,6 +72,8 @@ See PLAN.md for the full design.`,
 	root.AddCommand(newLogCmd())
 	root.AddCommand(newCanonCmd())
 	root.AddCommand(newRejudgeCmd())
+	root.AddCommand(newFileCmd())
+	root.AddCommand(newCaptionsCmd())
 
 	return root
 }

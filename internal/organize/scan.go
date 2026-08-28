@@ -4,39 +4,52 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 
 	"github.com/Anastylosis/Custodian/internal/config"
-	"github.com/Anastylosis/Custodian/internal/stash"
-	"github.com/Anastylosis/Custodian/internal/store"
+	"github.com/Anastylosis/Custodian/internal/ledger"
+	stash "github.com/Anastylosis/stash-go"
 )
 
-// ScanOptions configures one invocation of `custodian organize scan`.
-type ScanOptions struct {
-	PerPage   int
-	MaxScenes int
+// Entry is one file's proposed move, held in memory. The ledger is the
+// record of what actually moved (mutation_log); Entry is never persisted —
+// re-run `custodian file` to see the plan again.
+type Entry struct {
+	SceneID     string
+	FileID      string
+	CurrentPath string
+	TargetPath  string
+	Status      string // move|rename|already_correct|skip_no_metadata|conflict
+	Reason      string
 }
 
-// ScanResult summarizes the scan for the CLI.
+// ScanOptions configures one invocation of `custodian file`.
+type ScanOptions struct {
+	// Limit caps how many live scenes are considered (0 = no limit).
+	Limit int
+}
+
+// ScanResult summarizes the scan for the CLI and carries the per-scene entries.
 type ScanResult struct {
-	ScanRunID        int64
 	ScenesProcessed  int
 	Moves            int
 	Renames          int
 	AlreadyCorrect   int
 	SkipNoMetadata   int
 	Conflicts        int
-	MultiFileWarning int // scenes with >1 file where only primary gets moved
+	MultiFileWarning int // scenes with >1 file where only the primary gets moved
+	SkippedDuplicate int // losers of a quarantined/partial group, left alone: about to leave
+	Entries          []Entry
 }
 
-// Scan walks every scene in Stash, computes the ideal path per the
-// template, and stores the plan in organize_plans. Conflict detection
-// runs at the end: if two files map to the same target, both are marked
-// as conflicts.
-func Scan(ctx context.Context, c *stash.Client, st *store.Store, cfg *config.Config, opts ScanOptions) (*ScanResult, error) {
-	if c == nil || st == nil {
-		return nil, errors.New("organize.Scan: client and store are required")
+// Scan reads every live scene from the ledger, computes its ideal path per
+// the template, and returns the plan in memory. Scenes that are the
+// non-keeper side of a quarantined or partial duplicate group are skipped
+// outright: they are about to leave the library, so filing them is wasted
+// work (REBUILD.md §7 phase 5a).
+func Scan(ctx context.Context, l *ledger.Ledger, cfg *config.Config, opts ScanOptions) (*ScanResult, error) {
+	if l == nil {
+		return nil, errors.New("organize.Scan: a ledger is required")
 	}
 	orgCfg := &cfg.Organize
 	if orgCfg.BaseDir == "" {
@@ -45,136 +58,121 @@ func Scan(ctx context.Context, c *stash.Client, st *store.Store, cfg *config.Con
 	if orgCfg.PathTemplate == "" {
 		return nil, errors.New("organize.path_template must be set in config")
 	}
-	perPage := opts.PerPage
-	if perPage <= 0 {
-		perPage = 100
-	}
 
-	runID, err := st.StartScanRun(ctx, store.WorkflowOrganize, nil, nil)
+	scenes, err := l.FilingInputs(ctx, ledger.FilingFilter{Limit: opts.Limit})
 	if err != nil {
-		return nil, fmt.Errorf("starting scan run: %w", err)
+		return nil, fmt.Errorf("organize: reading filing inputs: %w", err)
+	}
+	losers, err := l.DuplicateLoserSceneIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("organize: reading duplicate loser scenes: %w", err)
+	}
+	multi, err := l.MultiFileScenes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("organize: reading multi-file scenes: %w", err)
+	}
+	existing, err := l.LiveFilePaths(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("organize: reading live file paths: %w", err)
 	}
 
-	res := &ScanResult{ScanRunID: runID}
-	targetSeen := map[string]*store.OrganizePlan{} // target_path → first plan that claimed it
-	existingPaths := map[string]string{}           // path → scene_id for files already on disk
-	page := 1
-	totalScenes := -1
+	res := &ScanResult{}
+	targetSeen := map[string]*Entry{} // target_path → first entry that claimed it
+	var entries []*Entry              // pointers: a later conflict can still flip an earlier entry
 
-	for {
-		slog.Info("fetching scenes page", "page", page, "per_page", perPage)
-		result, err := c.FindAllScenesPage(ctx, page, perPage)
-		if err != nil {
-			return nil, fmt.Errorf("findScenes(page=%d): %w", page, err)
+	for _, fs := range scenes {
+		if losers[fs.SceneID] {
+			res.SkippedDuplicate++
+			continue
 		}
-		if totalScenes == -1 {
-			totalScenes = result.Count
-			slog.Info("total scenes in library", "count", totalScenes)
-		}
-		if len(result.Scenes) == 0 {
-			break
+		res.ScenesProcessed++
+		if _, ok := multi[fs.SceneID]; ok {
+			res.MultiFileWarning++
 		}
 
-		// First pass: record all existing file paths on this page so we
-		// can detect "target already occupied by another file on disk".
-		for i := range result.Scenes {
-			for j := range result.Scenes[i].Files {
-				f := &result.Scenes[i].Files[j]
-				existingPaths[f.Path] = result.Scenes[i].ID
-			}
+		scene, file := filingScene(fs)
+		target, skipReason := ComputeTargetPath(scene, file, orgCfg)
+
+		e := &Entry{SceneID: fs.SceneID, FileID: fs.FileID, CurrentPath: fs.Path}
+		switch {
+		case skipReason != "":
+			e.Status, e.Reason, e.TargetPath = "skip_no_metadata", skipReason, fs.Path
+			res.SkipNoMetadata++
+		case target == fs.Path:
+			e.Status, e.TargetPath = "already_correct", target
+			res.AlreadyCorrect++
+		case filepath.Dir(target) == filepath.Dir(fs.Path) && orgCfg.RenameInPlace:
+			e.Status, e.TargetPath = "rename", target
+			res.Renames++
+		case filepath.Dir(target) == filepath.Dir(fs.Path):
+			e.Status, e.TargetPath, e.Reason = "already_correct", fs.Path, "in correct folder; rename_in_place is off"
+			res.AlreadyCorrect++
+		default:
+			e.Status, e.TargetPath = "move", target
+			res.Moves++
 		}
 
-		for i := range result.Scenes {
-			if opts.MaxScenes > 0 && res.ScenesProcessed >= opts.MaxScenes {
-				goto done
-			}
-			res.ScenesProcessed++
-			scene := &result.Scenes[i]
-			pf := scene.PrimaryFile()
-			if pf == nil {
-				continue
-			}
-
-			// Warn about multi-file scenes: only the primary file gets
-			// organized, others stay where they are.
-			if len(scene.Files) > 1 {
-				res.MultiFileWarning++
-			}
-
-			target, skipReason := ComputeTargetPath(scene, pf, orgCfg)
-			plan := &store.OrganizePlan{
-				ScanRunID:   runID,
-				SceneID:     scene.ID,
-				FileID:      pf.ID,
-				CurrentPath: pf.Path,
-			}
-
-			if skipReason != "" {
-				plan.Status = "skip_no_metadata"
-				plan.Reason = skipReason
-				plan.TargetPath = pf.Path
-				res.SkipNoMetadata++
-			} else if target == pf.Path {
-				plan.Status = "already_correct"
-				plan.TargetPath = target
-				res.AlreadyCorrect++
-			} else if filepath.Dir(target) == filepath.Dir(pf.Path) && orgCfg.RenameInPlace {
-				plan.Status = "rename"
-				plan.TargetPath = target
-				res.Renames++
-			} else if filepath.Dir(target) == filepath.Dir(pf.Path) && !orgCfg.RenameInPlace {
-				plan.Status = "already_correct"
-				plan.TargetPath = pf.Path
-				plan.Reason = "in correct folder; rename_in_place is off"
-				res.AlreadyCorrect++
-			} else {
-				plan.Status = "move"
-				plan.TargetPath = target
-				res.Moves++
-			}
-
-			// Conflict detection: check both "another file in this plan
-			// wants the same target" AND "a file already exists at the
-			// target path on disk (different scene)".
-			if plan.Status == "move" || plan.Status == "rename" {
-				// Check 1: another scene already at the target path on disk.
-				if occupantScene, occupied := existingPaths[target]; occupied && occupantScene != scene.ID {
-					plan.Status = "conflict"
-					plan.Reason = fmt.Sprintf("target path already occupied by scene %s", occupantScene)
-					res.Conflicts++
-					res.Moves-- // we already incremented above
-				} else if existing, ok := targetSeen[target]; ok {
-					// Check 2: two plans in this scan collide.
-					if existing.Status != "conflict" {
-						existing.Status = "conflict"
-						existing.Reason = fmt.Sprintf("conflicts with file %s (scene %s)", plan.FileID, plan.SceneID)
-						res.Conflicts++
-						res.Moves--
-					}
-					plan.Status = "conflict"
-					plan.Reason = fmt.Sprintf("conflicts with file %s (scene %s)", existing.FileID, existing.SceneID)
-					res.Conflicts++
-					res.Moves--
-				} else {
-					targetSeen[target] = plan
-				}
-			}
-
-			if err := st.UpsertOrganizePlan(ctx, plan); err != nil {
-				slog.Error("upsert organize plan failed; continuing",
-					"scene_id", scene.ID, "error", err)
-			}
+		// Conflict detection: a target already occupied by a different
+		// scene's file on disk, or by another entry claimed earlier in
+		// this same scan.
+		if e.Status == "move" || e.Status == "rename" {
+			claimTarget(e, target, fs.SceneID, existing, targetSeen, res)
 		}
 
-		if res.ScenesProcessed >= totalScenes {
-			break
-		}
-		page++
+		entries = append(entries, e)
 	}
 
-done:
-	if err := st.FinishScanRun(ctx, runID, res.ScenesProcessed); err != nil {
-		return nil, fmt.Errorf("finishing scan run: %w", err)
+	res.Entries = make([]Entry, len(entries))
+	for i, e := range entries {
+		res.Entries[i] = *e
 	}
 	return res, nil
+}
+
+// claimTarget resolves target-path collisions, converting e (and, if it was
+// the first claimant, the entry that got there first) to "conflict" and
+// correcting the move/rename counts it had already been added to.
+func claimTarget(e *Entry, target, sceneID string, existing map[string]string, targetSeen map[string]*Entry, res *ScanResult) {
+	if occupant, occupied := existing[target]; occupied && occupant != sceneID {
+		conflict(e, res, fmt.Sprintf("target path already occupied by scene %s", occupant))
+		return
+	}
+	if first, ok := targetSeen[target]; ok {
+		if first.Status != "conflict" {
+			conflict(first, res, fmt.Sprintf("conflicts with file %s (scene %s)", e.FileID, e.SceneID))
+		}
+		conflict(e, res, fmt.Sprintf("conflicts with file %s (scene %s)", first.FileID, first.SceneID))
+		return
+	}
+	targetSeen[target] = e
+}
+
+// conflict flips e to "conflict", undoing whichever move/rename count it was
+// already tallied into.
+func conflict(e *Entry, res *ScanResult, reason string) {
+	switch e.Status {
+	case "move":
+		res.Moves--
+	case "rename":
+		res.Renames--
+	}
+	e.Status, e.Reason = "conflict", reason
+	res.Conflicts++
+}
+
+// filingScene builds the stash-go Scene/File pair ComputeTargetPath expects
+// out of one ledger.FilingScene. Only the fields extractVars (template.go)
+// reads are populated.
+func filingScene(fs ledger.FilingScene) (*stash.Scene, *stash.File) {
+	var studio *stash.Studio
+	if fs.StudioName != "" {
+		studio = &stash.Studio{Name: fs.StudioName}
+	}
+	performers := make([]stash.Performer, len(fs.Performers))
+	for i, name := range fs.Performers {
+		performers[i] = stash.Performer{Name: name}
+	}
+	scene := &stash.Scene{ID: fs.SceneID, Title: fs.Title, Date: fs.Date, Studio: studio, Performers: performers}
+	file := &stash.File{Basename: fs.Basename, Height: fs.Height}
+	return scene, file
 }
