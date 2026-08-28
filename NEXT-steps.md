@@ -14,10 +14,11 @@ State on 2026-08-28: every REBUILD.md phase is delivered on branch `rebuild`
 
 ## Yours, in order
 
-1. **Move `.github`'s `v1` tag** past `66fb8c2` (cut `v1.5.0`), or Custodian's
-   CI job cannot find `library-writable`.
-2. **Push `rebuild`** — first real CI run: go-ci, dependency review, and the
-   Stash harness on the packages ci.yml lists (mirror, evidence, reclaim, subs).
+1. ~~Move `.github`'s `v1` tag~~ — done, points at `66fb8c2`.
+2. ~~Push `rebuild`~~ — done; CI green on all 11 jobs (run 33183367600),
+   after `20f77fd` fixed Windows (Stash paths joined with `filepath`). Note:
+   ci.yml runs on pushes to master and on PRs — a branch push needs
+   `gh workflow run ci.yml --ref rebuild` or a draft PR.
 3. After the Stash scan/generate: `custodian sync` then `custodian scan` —
    phash evidence for `/data/tmp4` only appears once those files have phashes.
 4. **Inspect** the 16 foreign files already in `/data/_quarantine` (13.9 GiB,
