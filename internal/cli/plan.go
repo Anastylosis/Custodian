@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Anastylosis/Custodian/internal/config"
 	"github.com/Anastylosis/Custodian/internal/confirm"
 	"github.com/Anastylosis/Custodian/internal/evidence"
 	"github.com/Anastylosis/Custodian/internal/keeper"
 	"github.com/Anastylosis/Custodian/internal/ledger"
+	"github.com/Anastylosis/Custodian/internal/organize"
 	stash "github.com/Anastylosis/stash-go"
 	"github.com/spf13/cobra"
 )
@@ -47,7 +49,7 @@ file. "apply" (later) is what acts on this plan.`,
 }
 
 func runPlan(cmd *cobra.Command, _ []string) error {
-	_, l, _, cleanup, err := loadLedgerAndClient(flagPlanLedger)
+	cfg, l, _, cleanup, err := loadLedgerAndClient(flagPlanLedger)
 	if err != nil {
 		return err
 	}
@@ -67,7 +69,7 @@ func runPlan(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	histogram, total, err := choose(ctx, l, groups, files)
+	histogram, total, err := choose(ctx, l, groups, files, cfg)
 	if err != nil {
 		return err
 	}
@@ -86,8 +88,8 @@ func runPlan(cmd *cobra.Command, _ []string) error {
 // choose runs keeper.Choose over every group, stores each choice, and fills
 // in Keeper/Steps/Reclaimable on groups in place. Returns a rule-name
 // histogram of what decided each group and the total reclaimable bytes.
-func choose(ctx context.Context, l *ledger.Ledger, groups []ledger.Group, files map[string]ledger.PrimaryFile) (map[string]int, int64, error) {
-	rules := keeper.DefaultRules()
+func choose(ctx context.Context, l *ledger.Ledger, groups []ledger.Group, files map[string]ledger.PrimaryFile, cfg *config.Config) (map[string]int, int64, error) {
+	rules := keeperRules(cfg)
 	histogram := map[string]int{}
 	var total int64
 
@@ -117,6 +119,19 @@ func choose(ctx context.Context, l *ledger.Ledger, groups []ledger.Group, files 
 		}
 	}
 	return histogram, total, nil
+}
+
+// keeperRules is keeper.DefaultRules with Filed backed by organize.Filed
+// (REBUILD.md §4.3's already_correct) when cfg has an organize template
+// configured; otherwise Filed stays nil and Choose falls back to the
+// StagingPrefixes heuristic.
+func keeperRules(cfg *config.Config) keeper.Rules {
+	rules := keeper.DefaultRules()
+	if cfg != nil && cfg.Organize.BaseDir != "" && cfg.Organize.PathTemplate != "" {
+		orgCfg := &cfg.Organize
+		rules.Filed = func(p string) bool { return organize.Filed(p, orgCfg) }
+	}
+	return rules
 }
 
 // formatPlan renders planned groups as the plain-text blocks `plan` prints,

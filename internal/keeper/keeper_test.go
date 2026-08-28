@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Anastylosis/Custodian/internal/ledger"
@@ -108,8 +109,32 @@ func TestChooseFiledBeatsStaging(t *testing.T) {
 		t.Fatalf("Keeper = %q, want 1 (filed)", got.Keeper)
 	}
 	last := got.Steps[len(got.Steps)-1]
-	if last.Rule != "location" || last.Detail != "filed vs staging" || last.Outcome != "1 wins" {
-		t.Errorf("deciding step = %+v, want location/filed vs staging/1 wins", last)
+	if last.Rule != "location" || last.Detail != "filed vs not filed" || last.Outcome != "1 wins" {
+		t.Errorf("deciding step = %+v, want location/filed vs not filed/1 wins", last)
+	}
+}
+
+// TestChooseCustomFiledPredicateDecidesLocation shows a caller-supplied Filed
+// predicate — not the StagingPrefixes heuristic — deciding the location
+// step, as plan wires organize.Filed in.
+func TestChooseCustomFiledPredicateDecidesLocation(t *testing.T) {
+	files := map[string]ledger.PrimaryFile{
+		"1": {Width: 1920, Height: 1080, BitRate: 5_000_000, VideoCodec: "hevc", Size: 1_000_000, Path: "/library/a.mp4"},
+		"2": {Width: 1920, Height: 1080, BitRate: 5_000_000, VideoCodec: "hevc", Size: 1_000_000, Path: "/library/b.mp4"},
+	}
+	rules := DefaultRules()
+	// Neither path has a StagingPrefixes prefix, so the default heuristic
+	// would call both filed and tie through to scene_id. This predicate
+	// disagrees, so it must be the one Choose actually consults.
+	rules.Filed = func(p string) bool { return strings.HasSuffix(p, "a.mp4") }
+
+	got := Choose(group("1", "2"), files, rules)
+	if got.Keeper != "1" {
+		t.Fatalf("Keeper = %q, want 1 (custom Filed predicate)", got.Keeper)
+	}
+	last := got.Steps[len(got.Steps)-1]
+	if last.Rule != "location" || last.Detail != "filed vs not filed" || last.Outcome != "1 wins" {
+		t.Errorf("deciding step = %+v, want location/filed vs not filed/1 wins", last)
 	}
 }
 
@@ -218,8 +243,8 @@ func TestChooseBothStagingFallsThroughToSceneID(t *testing.T) {
 	}
 	// The location rule immediately before it should record the tie.
 	loc := got.Steps[len(got.Steps)-2]
-	if loc.Rule != "location" || loc.Detail != "both staging" || loc.Outcome != "tie" {
-		t.Errorf("location step = %+v, want both staging/tie", loc)
+	if loc.Rule != "location" || loc.Detail != "both not filed" || loc.Outcome != "tie" {
+		t.Errorf("location step = %+v, want both not filed/tie", loc)
 	}
 }
 

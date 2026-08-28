@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Anastylosis/Custodian/internal/config"
 	"github.com/Anastylosis/Custodian/internal/keeper"
 	"github.com/Anastylosis/Custodian/internal/ledger"
 )
@@ -177,7 +178,7 @@ func TestChoosePersistsAndComputesReclaimable(t *testing.T) {
 		t.Fatalf("PrimaryFiles: %v", err)
 	}
 
-	histogram, total, err := choose(ctx, l, groups, files)
+	histogram, total, err := choose(ctx, l, groups, files, &config.Config{})
 	if err != nil {
 		t.Fatalf("choose: %v", err)
 	}
@@ -213,5 +214,58 @@ func TestChoosePersistsAndComputesReclaimable(t *testing.T) {
 func TestPlanUsesKeeperDefaultRules(t *testing.T) {
 	if len(keeper.DefaultRules().CodecPreference) == 0 {
 		t.Fatal("keeper.DefaultRules().CodecPreference is empty")
+	}
+}
+
+// TestChooseWiresOrganizeFiledForLocationTiebreak shows plan's choose wiring
+// organize.Filed into keeper.Rules.Filed: two scenes tie on tier, bitrate,
+// codec and size, and neither path sits under keeper's default
+// StagingPrefixes ("/data/tmp", "/data/nosort"), so the StagingPrefixes
+// heuristic alone would call both filed and fall through to scene_id. With
+// an organize template configured, the location step must instead decide
+// on organize's base_dir, and the report must read "location: filed vs not
+// filed".
+func TestChooseWiresOrganizeFiledForLocationTiebreak(t *testing.T) {
+	l := newPlanTestLedger(t)
+	ctx := context.Background()
+
+	insertSceneFile(t, l, "9904", "/library/Some Performer/a.mp4", "a.mp4", 1_000_000, 1920, 1080, 5_000_000, "hevc")
+	insertSceneFile(t, l, "9905", "/incoming/b.mp4", "b.mp4", 1_000_000, 1920, 1080, 5_000_000, "hevc")
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	group := ledger.Group{Signature: "sig1", SceneIDs: []string{"9904", "9905"}, Verdict: ledger.VerdictCertain, Reason: "durations agree"}
+	if err := l.ReplaceGroups(ctx, runID, []ledger.Group{group}); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	groups, err := l.Groups(ctx, ledger.GroupFilter{Verdict: ledger.VerdictCertain})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	files, err := l.PrimaryFiles(ctx, allSceneIDs(groups))
+	if err != nil {
+		t.Fatalf("PrimaryFiles: %v", err)
+	}
+
+	cfg := &config.Config{Organize: config.OrganizeConfig{
+		BaseDir:      "/library",
+		PathTemplate: "{performer}/{title}.{ext}",
+	}}
+	if _, _, err := choose(ctx, l, groups, files, cfg); err != nil {
+		t.Fatalf("choose: %v", err)
+	}
+
+	last := groups[0].Steps[len(groups[0].Steps)-1]
+	if last.Rule != "location" || last.Detail != "filed vs not filed" || last.Outcome != "9904 wins" {
+		t.Fatalf("deciding step = %+v, want location/filed vs not filed/9904 wins", last)
+	}
+
+	var b strings.Builder
+	formatPlanGroup(&b, groups[0], files)
+	if !strings.Contains(b.String(), "  location: filed vs not filed → 9904 wins\n") {
+		t.Errorf("formatPlanGroup output =\n%s\nwant a line reading location: filed vs not filed → 9904 wins", b.String())
 	}
 }

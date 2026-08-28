@@ -300,19 +300,19 @@ func normalizeCodec(c string) string {
 	return c
 }
 
-// compareFiled prefers a filed path (organize's already_correct) over a
-// staging one.
+// compareFiled prefers a filed path (organize's already_correct) over an
+// unfiled one, whatever r.Filed considers "filed" to mean.
 func compareFiled(aID, bID, aPath, bPath string, filed func(string) bool) (winner, detail string, tie bool) {
 	fa, fb := filed(aPath), filed(bPath)
 	switch {
 	case fa == fb && fa:
 		return "", "both filed", true
 	case fa == fb:
-		return "", "both staging", true
+		return "", "both not filed", true
 	case fa:
-		return aID, "filed vs staging", false
+		return aID, "filed vs not filed", false
 	default:
-		return bID, "staging vs filed", false
+		return bID, "not filed vs filed", false
 	}
 }
 
