@@ -30,48 +30,26 @@ func DefaultConfigPath() string {
 	return "config.yaml"
 }
 
-// DefaultDBPath returns the path to use when --db is not specified.
+// LedgerName is the ledger file's basename, wherever it lives.
+const LedgerName = "custodian.ledger.sqlite"
+
+// DefaultLedgerPath returns the ledger's path when --ledger is not given.
 // Resolution order:
-//  1. ./custodian.sqlite (if it exists — backward compat)
-//  2. $XDG_DATA_HOME/custodian/custodian.sqlite
-//  3. ./custodian.sqlite (fallback)
-func DefaultDBPath() string {
-	if _, err := os.Stat("custodian.sqlite"); err == nil {
-		return "custodian.sqlite"
+//  1. ./custodian.ledger.sqlite (if it exists — a portable / per-library setup)
+//  2. $XDG_DATA_HOME/custodian/custodian.ledger.sqlite
+//
+// There is one database and one flag for it. Earlier builds derived the
+// ledger's name from a --db path that pointed at a store which no longer
+// exists; the name it derived is the one returned here, so an existing ledger
+// is found where it already sits.
+func DefaultLedgerPath() string {
+	if _, err := os.Stat(LedgerName); err == nil {
+		return LedgerName
 	}
-
 	if dir := dataHome(); dir != "" {
-		xdg := filepath.Join(dir, "custodian", "custodian.sqlite")
-		if _, err := os.Stat(xdg); err == nil {
-			return xdg
-		}
+		return filepath.Join(dir, "custodian", LedgerName)
 	}
-
-	// Anyone who ran an older build with XDG_CONFIG_HOME set has a database
-	// under the *config* root, because dataHome() used to fall through to it.
-	// Adopt that file rather than silently starting an empty database beside
-	// it — the scan history and decisions in there are not reproducible.
-	if legacy := legacyDBPath(); legacy != "" {
-		if _, err := os.Stat(legacy); err == nil {
-			return legacy
-		}
-	}
-
-	return "custodian.sqlite"
-}
-
-// legacyDBPath is where a database landed while dataHome() was misdetecting
-// the platform. Empty when that location coincides with the correct one, so
-// this only ever names a genuinely different path.
-func legacyDBPath() string {
-	cfg, err := os.UserConfigDir()
-	if err != nil {
-		return ""
-	}
-	if cfg == dataHome() {
-		return ""
-	}
-	return filepath.Join(cfg, "custodian", "custodian.sqlite")
+	return LedgerName
 }
 
 // DefaultConfigInitPath returns the path `config init` should write to.
@@ -81,15 +59,6 @@ func DefaultConfigInitPath() string {
 		return filepath.Join(dir, "custodian", "config.yaml")
 	}
 	return "config.yaml"
-}
-
-// DefaultDBInitPath returns the path the store should use when creating
-// a new database. Prefers XDG; falls back to current directory.
-func DefaultDBInitPath() string {
-	if dir := dataHome(); dir != "" {
-		return filepath.Join(dir, "custodian", "custodian.sqlite")
-	}
-	return "custodian.sqlite"
 }
 
 // dataHome returns the platform-appropriate directory for user data:

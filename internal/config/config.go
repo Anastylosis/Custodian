@@ -31,18 +31,12 @@ func DefaultYAML() []byte {
 
 // Config is the root configuration object.
 type Config struct {
-	Stash                Stash                `yaml:"stash"`
-	Scan                 Scan                 `yaml:"scan"`
-	Scoring              Scoring              `yaml:"scoring"`
-	ReviewPolicy         ReviewPolicy         `yaml:"review_policy"`
-	Apply                Apply                `yaml:"apply"`
-	Orphans              OrphansConfig        `yaml:"orphans"`
-	Organize             OrganizeConfig       `yaml:"organize"`
-	Sidecars             SidecarsConfig       `yaml:"sidecars"`
-	StashBoxFingerprints StashBoxFingerprints `yaml:"stash_box_fingerprints"`
-	Merge                Merge                `yaml:"merge"`
-	Quarantine           Quarantine           `yaml:"quarantine"`
-	Sources              Sources              `yaml:"sources"`
+	Stash      Stash          `yaml:"stash"`
+	Scan       Scan           `yaml:"scan"`
+	Organize   OrganizeConfig `yaml:"organize"`
+	Sidecars   SidecarsConfig `yaml:"sidecars"`
+	Quarantine Quarantine     `yaml:"quarantine"`
+	Sources    Sources        `yaml:"sources"`
 }
 
 // Sources configures where `custodian canon` looks for canonical durations
@@ -138,13 +132,6 @@ type OrganizeConfig struct {
 	RenameInPlace           bool     `yaml:"rename_in_place"`
 }
 
-type OrphansConfig struct {
-	BatchSize            int    `yaml:"batch_size"`
-	BatchDelay           string `yaml:"batch_delay"`
-	WriteStashIDOnApply  bool   `yaml:"write_stash_id_on_apply"`
-	WriteMetadataOnApply bool   `yaml:"write_metadata_on_apply"`
-}
-
 type Stash struct {
 	URL       string `yaml:"url"`
 	APIKeyEnv string `yaml:"api_key_env"`
@@ -153,68 +140,6 @@ type Stash struct {
 type Scan struct {
 	PhashDistance       int     `yaml:"phash_distance"`
 	DurationDiffSeconds float64 `yaml:"duration_diff_seconds"`
-}
-
-type Scoring struct {
-	Scenes        ScoringScenes `yaml:"scenes"`
-	Files         ScoringFiles  `yaml:"files"`
-	CodecPriority []string      `yaml:"codec_priority"`
-	PathPriority  []string      `yaml:"path_priority"`
-}
-
-type ScoringScenes struct {
-	Rules []string `yaml:"rules"`
-}
-
-type ScoringFiles struct {
-	Rules           []string        `yaml:"rules"`
-	FilenameQuality FilenameQuality `yaml:"filename_quality"`
-}
-
-// FilenameQuality holds the regex pattern used to score files by filename.
-// The pattern is stored as a string here; the scoring engine compiles it
-// once at startup.
-type FilenameQuality struct {
-	Pattern string `yaml:"pattern"`
-}
-
-type ReviewPolicy struct {
-	FlagMetadataQualityConflict bool `yaml:"flag_metadata_quality_conflict"`
-}
-
-type Apply struct {
-	Scenes ApplyScenes `yaml:"scenes"`
-	Files  ApplyFiles  `yaml:"files"`
-}
-
-type ApplyScenes struct {
-	DefaultAction string `yaml:"default_action"`
-	LoserTag      string `yaml:"loser_tag"`
-	KeeperTag     string `yaml:"keeper_tag"`
-}
-
-type ApplyFiles struct {
-	DefaultAction string `yaml:"default_action"`
-}
-
-type StashBoxFingerprints struct {
-	Enabled bool `yaml:"enabled"`
-}
-
-type Merge struct {
-	SceneLevel           map[string]string    `yaml:"scene_level"`
-	History              MergeHistory         `yaml:"history"`
-	PostMergeFileCleanup PostMergeFileCleanup `yaml:"post_merge_file_cleanup"`
-}
-
-type MergeHistory struct {
-	PlayHistory bool `yaml:"play_history"`
-	OHistory    bool `yaml:"o_history"`
-}
-
-type PostMergeFileCleanup struct {
-	Enabled              bool `yaml:"enabled"`
-	RenameWinnerFilename bool `yaml:"rename_winner_filename"`
 }
 
 // Load reads the user's config file (if it exists) and merges it on top of
@@ -258,13 +183,11 @@ func (c *Config) Validate() error {
 	if c.Scan.DurationDiffSeconds < 0 {
 		return fmt.Errorf("config: scan.duration_diff_seconds must be >= 0, got %v", c.Scan.DurationDiffSeconds)
 	}
-	switch c.Apply.Scenes.DefaultAction {
-	case "tag", "merge", "delete":
-	default:
-		return fmt.Errorf("config: apply.scenes.default_action must be tag|merge|delete, got %q", c.Apply.Scenes.DefaultAction)
+	if c.Quarantine.Dir == "" {
+		return errors.New("config: quarantine.dir must not be empty — apply moves losers there")
 	}
-	if c.Apply.Files.DefaultAction != "report" && c.Apply.Files.DefaultAction != "commit" {
-		return fmt.Errorf("config: apply.files.default_action must be report|commit, got %q", c.Apply.Files.DefaultAction)
+	if c.Quarantine.Tag == "" {
+		return errors.New("config: quarantine.tag must not be empty — prune finds losers by it")
 	}
 	return nil
 }

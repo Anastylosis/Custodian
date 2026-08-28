@@ -3,6 +3,7 @@ package evidence
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ import (
 // when SFX_INT_STASH_URL is set in the environment. Without that env var it
 // is skipped, so `go test ./...` stays hermetic. SFX_INT_STASH_SEEDED=1 turns
 // a missing fixture into a failure instead of a skip — see
-// internal/stash/integration_test.go for the full explanation; this copies
+// internal/mirror/integration_test.go for the full explanation; this copies
 // the same tiny gate since the two aren't in the same package.
 func integrationClient(t *testing.T) *stash.Client {
 	t.Helper()
@@ -90,5 +91,50 @@ func TestIntegrationStashIDEvidence(t *testing.T) {
 	}
 	if summary.Certain < 1 {
 		t.Errorf("summary.Certain = %d, want >= 1", summary.Certain)
+	}
+}
+
+// TestIntegrationPhashEvidence exercises the one generator that reads the
+// live server rather than the ledger. distance 0 keeps the response to
+// byte-equivalent perceptual hashes, which is what the fixture library's
+// duplicate pair (an mp4 and its remux) is; anything wrong with the
+// findDuplicateScenes call, its unpaginated stream decode, or the mapping
+// of the returned scenes back onto ledger rows shows up as no group at all.
+func TestIntegrationPhashEvidence(t *testing.T) {
+	client := integrationClient(t)
+	l := newTestLedger(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	if _, err := mirror.Sync(ctx, client, l, mirror.Options{Full: true}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	gen := PhashGenerator{Client: client, Distance: 0, DurationDiff: 1.0}
+	if _, err := Run(ctx, l, []Generator{gen}, Policy{Tolerance: DefaultTolerance}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	groups, err := l.Groups(ctx, ledger.GroupFilter{})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	requireSeeded(t, len(groups) >= 1,
+		"phash at distance 0 found no group; the fixture library holds an mp4 and its remux")
+
+	for _, g := range groups {
+		if len(g.SceneIDs) < 2 {
+			t.Errorf("group %s has %v; a duplicate group needs at least two scenes", g.Signature, g.SceneIDs)
+		}
+		var kinds []string
+		for _, e := range g.Evidence {
+			kinds = append(kinds, e.Kind)
+		}
+		if !slices.Contains(kinds, "phash_group") {
+			t.Errorf("group %s carries no phash_group evidence, only %v", g.Signature, kinds)
+		}
+		if g.Reclaimable <= 0 {
+			t.Errorf("group %s: Reclaimable = %d, want > 0", g.Signature, g.Reclaimable)
+		}
 	}
 }

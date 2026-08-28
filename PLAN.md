@@ -1,5 +1,11 @@
 # StashJanitor — Plan v1
 
+> **Superseded by [REBUILD.md](REBUILD.md), 2026-08-28.** The five parallel
+> workflows this document designs — `scenes`, `files`, `orphans`, `organize`,
+> `subs` — no longer exist; the tool is one chain, and the packages named
+> below were deleted. Kept for the history and for the Stash behaviours it
+> recorded, which are carried forward in MANUAL.md.
+
 Status: **draft, awaiting user sign-off**
 Author: collaborative planning session, 2026-04-09
 

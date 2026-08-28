@@ -28,18 +28,14 @@ linters:
         - (*text/tabwriter.Writer).Flush
 
     gocyclo:
-      # At the standard 30 threshold, five functions are outliers — all
-      # apply/scan/merge orchestrators whose complexity is the sequential
-      # pipeline the design calls for (fetch, validate, mutate, report at
-      # each step), not tangled control flow:
-      #   internal/merge/union.go:49    BuildUnion          56
-      #   internal/apply/merger.go:170  executeOneMerge     46
-      #   internal/scan/orphans.go:68   Orphans             45
-      #   internal/cli/scenes.go:238    runScenesApply      38
-      #   internal/organize/scan.go:37  Scan                33
-      # Not refactored here (that's a separate task); 57 gates new outliers
-      # above the current worst (56) with no headroom to spare.
-      min-complexity: 57
+      # The old spine's orchestrators (union, merger, the scenes/orphans
+      # scans) are gone and took the worst outliers with them; 57 dropped to
+      # 40. What is left above the standard 30 is the sequential pipeline the
+      # design calls for — fetch, validate, mutate, report at each step — and
+      # internal/reclaim's end-to-end integration test, which walks an apply
+      # and a prune step by step against a live Stash (39). No headroom to
+      # spare, so a new outlier has to be argued for rather than absorbed.
+      min-complexity: 40
 
     revive:
       rules:
@@ -88,14 +84,6 @@ linters:
         linters:
           - revive
         text: '^(exported|package-comments|unused-parameter):'
-
-      # The TUI builds its view by appending to a strings.Builder. staticcheck
-      # suggests fmt.Fprintf(&b, ...) instead, which is equivalent here but
-      # reads worse in a long sequence of view lines.
-      - path: internal/tui/
-        linters:
-          - staticcheck
-        text: "^QF1012:"
 
 formatters:
   enable:

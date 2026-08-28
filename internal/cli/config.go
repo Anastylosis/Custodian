@@ -9,17 +9,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newConfigCmd builds the `custodian config` subcommand tree. Currently only `init`
-// is planned for Phase 1; future commands (validate, show) can be added here.
+// newConfigCmd builds the `custodian config` subcommand tree.
 func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Manage the custodian config file",
+		Short: "Write, locate, print and check the config file",
 	}
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "init",
-		Short: "Write a default config file (XDG location or --config path)",
+		Short: "Write a default config file",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			path := flagConfigPath
 			if path == "" {
@@ -35,14 +34,14 @@ func newConfigCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "wrote default config to %s\n", path)
-			fmt.Fprintf(cmd.OutOrStdout(), "edit stash.url to point at your Stash instance, then run `custodian stats`\n")
+			fmt.Fprintf(cmd.OutOrStdout(), "edit stash.url to point at your Stash instance, then run `custodian doctor`\n")
 			return nil
 		},
 	})
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "path",
-		Short: "Print the config file path that would be used",
+		Short: "Print the config file path in use",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			path := flagConfigPath
 			if path == "" {
@@ -55,7 +54,7 @@ func newConfigCmd() *cobra.Command {
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "show",
-		Short: "Load the current config (defaults + your overrides) and print it as YAML",
+		Short: "Print the effective config — defaults plus your overrides",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			path := flagConfigPath
 			if path == "" {
@@ -74,6 +73,32 @@ func newConfigCmd() *cobra.Command {
 			}
 			_, err = cmd.OutOrStdout().Write(out)
 			return err
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "validate",
+		Short: "Check the config for retired keys and bad values",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			path := flagConfigPath
+			if path == "" {
+				path = config.DefaultConfigPath()
+			}
+			problems, err := config.Check(path)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if len(problems) == 0 {
+				fmt.Fprintf(out, "%s: ok\n", path)
+				return nil
+			}
+			fmt.Fprintf(out, "%s\n\n", path)
+			for _, p := range problems {
+				fmt.Fprintf(out, "  %-9s %s\n", p.Key, p.Detail)
+			}
+			fmt.Fprintf(out, "\n`custodian config init --config <new path>` writes the current shape.\n")
+			return fmt.Errorf("%d problem(s) in %s", len(problems), path)
 		},
 	})
 

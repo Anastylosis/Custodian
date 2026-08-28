@@ -38,7 +38,7 @@ reachable server; without stash.url configured it is skipped with a note.`,
 	}
 	cmd.Flags().Float64Var(&flagScanTolerancePct, "tolerance-pct", 2, "duration tolerance, percent of the longer duration")
 	cmd.Flags().Float64Var(&flagScanToleranceSec, "tolerance-seconds", 120, "duration tolerance, flat seconds cap")
-	cmd.Flags().StringVar(&flagScanLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagScanLedger, "ledger", "", ledgerFlagUsage)
 	cmd.Flags().StringVar(&flagScanGenerators, "generators", strings.Join(allGenerators, ","),
 		"comma-separated generators to run: stash_id, phash, multifile, filename, title_date")
 	return cmd

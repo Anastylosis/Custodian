@@ -53,8 +53,8 @@ jobs:
     with:
       url-env-var: SFX_INT_STASH_URL
       # The switch that lets this job fail. Without it every assertion in
-      # internal/stash/integration_test.go is free to skip on an empty library
-      # and still report green.
+      # the integration tests is free to skip on an empty library and still
+      # report green.
       seeded-env-var: SFX_INT_STASH_SEEDED
       # internal/reclaim/integration_test.go moves and deletes files in the
       # fixture library — Apply's moveFiles into /library/_quarantine and
@@ -77,12 +77,12 @@ jobs:
       # bookkeeping) are set directly on test-command instead.
       library-writable: true
       # No build tag on these tests, so the harness default
-      # (`-tags=integration ./...`) would run nothing. mirror, evidence and
-      # reclaim carry the same env-gated pattern as internal/stash, so they
-      # widen the same command rather than getting a second job.
+      # (`-tags=integration ./...`) would run nothing. All four packages carry
+      # the same env-gated pattern, so they widen one command rather than
+      # taking a job each.
       test-command: >-
         SFX_INT_STASH_WRITABLE=1 SFX_INT_STASH_LIBRARY_DIR="$RUNNER_TEMP/stash-library"
-        go test -count=1 ./internal/stash/... ./internal/mirror/... ./internal/evidence/... ./internal/reclaim/...
+        go test -count=1 ./internal/mirror/... ./internal/evidence/... ./internal/reclaim/... ./internal/subs/...
 
 # What Custodian gains by adopting: gotestsum + JUnit + Codecov upload, the
 # coverage step summary, and a cross-build matrix — none of which its hand-
@@ -92,7 +92,7 @@ jobs:
 # Custodian has no Dockerfile, so check-dockerfile-go-version stays off and
 # there is no docker workflow to adopt.
 #
-# Its internal/{stash,mirror,evidence,reclaim}/integration_test.go files
+# Its internal/{mirror,evidence,reclaim,subs}/integration_test.go files
 # carry no build tag: each is gated on SFX_INT_STASH_URL at runtime instead,
 # so `go test ./...` in the `ci` job skips every one of those tests and
 # stays hermetic. The stash-integration job is what supplies that variable —

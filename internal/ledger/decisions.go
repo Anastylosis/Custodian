@@ -8,7 +8,10 @@ import (
 )
 
 // Decision is an operator override, keyed by a group's sorted file oshashes
-// (falling back to a shared stash_id). Nothing reads these yet.
+// (falling back to a shared stash_id) and never by scene id — scene ids die
+// on a merge and change on a rescan, so a decision keyed on one would not
+// survive the thing it was made about. `custodian groups dismiss` writes
+// these; evidence.Run reads them back on every scan.
 type Decision struct {
 	Key       string
 	Kind      string
@@ -49,6 +52,16 @@ func (l *Ledger) GetDecision(ctx context.Context, key string) (Decision, bool, e
 	}
 	d.Keeper = keeper.String
 	return d, true, nil
+}
+
+// DeleteDecision removes the decision stored under key. Deleting one that
+// was never there is not an error — the caller wanted no decision under this
+// key, and there is none.
+func (l *Ledger) DeleteDecision(ctx context.Context, key string) error {
+	if _, err := l.db.ExecContext(ctx, `DELETE FROM decision WHERE key = ?`, key); err != nil {
+		return fmt.Errorf("ledger: deleting decision %s: %w", key, err)
+	}
+	return nil
 }
 
 // Mutation is one write Custodian made to Stash or the filesystem: what,

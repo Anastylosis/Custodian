@@ -19,7 +19,7 @@ var (
 func newRejudgeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rejudge",
-		Short: "Re-classify conflicted and certain groups against their canonical durations",
+		Short: "Re-classify groups against their canonical runtimes",
 		Long: `Runs evidence.Rejudge over every live "conflicted" and "certain" group that
 now has a canonical duration for all of its scenes (fetched by "custodian
 canon"): all scenes matching moves a group to certain, one matching and the
@@ -31,7 +31,7 @@ Read-only against Stash — rejudge only reads and writes the ledger.`,
 	}
 	cmd.Flags().Float64Var(&flagRejudgeTrimmedPct, "trimmed-pct", evidence.DefaultTrimmed.Percent*100, "trimmed tolerance, percent of the canonical duration")
 	cmd.Flags().Float64Var(&flagRejudgeTrimmedSec, "trimmed-seconds", evidence.DefaultTrimmed.Seconds, "trimmed tolerance, flat seconds cap")
-	cmd.Flags().StringVar(&flagRejudgeLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagRejudgeLedger, "ledger", "", ledgerFlagUsage)
 	return cmd
 }
 

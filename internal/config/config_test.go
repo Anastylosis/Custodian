@@ -27,29 +27,17 @@ func TestEmbeddedDefaultsParse(t *testing.T) {
 	if cfg.Scan.DurationDiffSeconds != 1.0 {
 		t.Errorf("expected default duration_diff_seconds=1.0, got %v", cfg.Scan.DurationDiffSeconds)
 	}
-	if got, want := cfg.Apply.Scenes.DefaultAction, "tag"; got != want {
-		t.Errorf("expected default apply.scenes.default_action=%q, got %q", want, got)
+	if got, want := cfg.Quarantine.Dir, "/data/_quarantine"; got != want {
+		t.Errorf("expected default quarantine.dir=%q, got %q", want, got)
 	}
-	if got, want := cfg.Apply.Files.DefaultAction, "report"; got != want {
-		t.Errorf("expected default apply.files.default_action=%q, got %q", want, got)
+	if got, want := cfg.Quarantine.Tag, "_custodian_quarantine"; got != want {
+		t.Errorf("expected default quarantine.tag=%q, got %q", want, got)
 	}
-	if !cfg.ReviewPolicy.FlagMetadataQualityConflict {
-		t.Error("expected flag_metadata_quality_conflict to default to true")
+	if !cfg.Sidecars.Enabled {
+		t.Error("expected sidecars.enabled to default to true")
 	}
-	if !cfg.Merge.PostMergeFileCleanup.Enabled {
-		t.Error("expected merge.post_merge_file_cleanup.enabled to default to true")
-	}
-	if cfg.Scoring.Files.FilenameQuality.Pattern == "" {
-		t.Error("expected scoring.files.filename_quality.pattern to default to a non-empty regex")
-	}
-	if len(cfg.Scoring.Scenes.Rules) == 0 {
-		t.Error("expected scoring.scenes.rules to be populated by defaults")
-	}
-	if len(cfg.Scoring.Files.Rules) == 0 {
-		t.Error("expected scoring.files.rules to be populated by defaults")
-	}
-	if got, want := cfg.Scoring.Files.Rules[0], "filename_quality"; got != want {
-		t.Errorf("expected first file rule to be %q, got %q", want, got)
+	if len(cfg.Organize.RequiredFields) == 0 {
+		t.Error("expected organize.required_fields to be populated by defaults")
 	}
 	if got, want := cfg.Quarantine.MistagTag, "_custodian_mistag"; got != want {
 		t.Errorf("expected default quarantine.mistag_tag=%q, got %q", want, got)
@@ -94,8 +82,8 @@ scan:
 		t.Errorf("Scan.DurationDiffSeconds = %v, want %v (default)", got, want)
 	}
 	// Unspecified slice — must come from defaults.
-	if len(cfg.Scoring.Scenes.Rules) == 0 {
-		t.Error("Scoring.Scenes.Rules should still be populated from defaults")
+	if len(cfg.Sidecars.Extensions) == 0 {
+		t.Error("Sidecars.Extensions should still be populated from defaults")
 	}
 }
 
@@ -108,9 +96,9 @@ func TestUserSliceReplacesWholesale(t *testing.T) {
 	userYAML := `
 stash:
   url: http://example.test:9999
-scoring:
-  codec_priority:
-    - h264
+sidecars:
+  extensions:
+    - srt
 `
 	if err := os.WriteFile(path, []byte(userYAML), 0o644); err != nil {
 		t.Fatal(err)
@@ -120,32 +108,109 @@ scoring:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got, want := cfg.Scoring.CodecPriority, []string{"h264"}; len(got) != len(want) || got[0] != want[0] {
-		t.Errorf("CodecPriority = %v, want %v (user list should replace, not append)", got, want)
+	if got, want := cfg.Sidecars.Extensions, []string{"srt"}; len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("Sidecars.Extensions = %v, want %v (user list should replace, not append)", got, want)
 	}
 }
 
-// TestValidateRejectsBadAction makes sure typos in apply.scenes.default_action
-// are caught at load time, not silently ignored.
-func TestValidateRejectsBadAction(t *testing.T) {
+// TestValidateRejectsEmptyQuarantineDir makes sure a blanked-out quarantine
+// directory is caught at load time: apply moves every loser there, and an
+// empty value would send moveFiles at the library root.
+func TestValidateRejectsEmptyQuarantineDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	userYAML := `
 stash:
   url: http://example.test:9999
-apply:
-  scenes:
-    default_action: tagg
+quarantine:
+  dir: ""
 `
 	if err := os.WriteFile(path, []byte(userYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(path)
 	if err == nil {
-		t.Fatal("expected validation error for typo'd default_action, got nil")
+		t.Fatal("expected validation error for an empty quarantine.dir, got nil")
 	}
-	if !strings.Contains(err.Error(), "default_action") {
-		t.Errorf("expected error to mention default_action, got: %v", err)
+	if !strings.Contains(err.Error(), "quarantine.dir") {
+		t.Errorf("expected error to mention quarantine.dir, got: %v", err)
+	}
+}
+
+// A config written for the old spine still parses — yaml.v3 drops keys with
+// no struct field — so `config validate` is the only place a retired key can
+// be reported. Every message has to name what replaced it, or the user is
+// told what not to do without being told what to do.
+func TestCheckReportsRetiredKeysAndTheirReplacements(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	userYAML := `
+stash:
+  url: http://example.test:9999
+scoring:
+  path_priority:
+    - /sorted
+apply:
+  scenes:
+    default_action: tag
+merge:
+  history:
+    play_history: true
+`
+	if err := os.WriteFile(path, []byte(userYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	problems, err := Check(path)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	got := map[string]string{}
+	for _, p := range problems {
+		got[p.Key] = p.Detail
+	}
+	for _, key := range []string{"scoring", "apply", "merge"} {
+		detail, ok := got[key]
+		if !ok {
+			t.Errorf("%s not reported as retired; got %v", key, problems)
+			continue
+		}
+		if !strings.Contains(detail, "retired") {
+			t.Errorf("%s: detail %q does not say it is retired", key, detail)
+		}
+	}
+	if d := got["scoring"]; !strings.Contains(d, "keeper rules") {
+		t.Errorf("scoring: detail should name the keeper rules as the replacement, got %q", d)
+	}
+	if d := got["merge"]; !strings.Contains(d, "stash-go") {
+		t.Errorf("merge: detail should name stash-go's union policy, got %q", d)
+	}
+	if d := got["apply"]; !strings.Contains(d, "--commit") {
+		t.Errorf("apply: detail should describe what apply does now, got %q", d)
+	}
+}
+
+// A config in the current shape is clean, and so is having no file at all.
+func TestCheckAcceptsTheCurrentShape(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := WriteDefault(path); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := Check(path)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(problems) != 0 {
+		t.Errorf("the file `config init` writes must validate clean, got %v", problems)
+	}
+
+	problems, err = Check(filepath.Join(dir, "nothing-here.yaml"))
+	if err != nil {
+		t.Fatalf("Check (missing file): %v", err)
+	}
+	if len(problems) != 0 {
+		t.Errorf("a missing config is the embedded defaults, got %v", problems)
 	}
 }
 

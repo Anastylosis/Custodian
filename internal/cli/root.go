@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 )
@@ -12,33 +13,57 @@ import (
 // Global flag values, populated by cobra during command setup.
 var (
 	flagConfigPath string
-	flagDBPath     string
 	flagVerbose    int
 )
+
+// chain is the order the commands are meant to be run in, and the list
+// `custodian` with no arguments prints. Keeping it here rather than deriving
+// it from cobra's alphabetical order is the point: the sequence is the
+// product, and a user who runs the tool blind should be told it.
+var chain = []struct{ name, what string }{
+	{"sync", "mirror Stash's scenes and files into the local ledger"},
+	{"scan", "find duplicate-candidate groups from the ledger's signals"},
+	{"canon", "fetch canonical runtimes from a stash-box or an FSS catalogue"},
+	{"rejudge", "re-classify groups against those runtimes"},
+	{"plan", "choose the keeper in every group"},
+	{"apply", "union metadata onto the keeper, quarantine the losers"},
+	{"prune", "delete quarantined losers once they are old enough"},
+	{"undo", "reverse an apply from the mutation log"},
+	{"file", "move and rename files to match the organize template"},
+	{"captions", "match loose subtitles to scenes and move them into place"},
+	{"groups", "list duplicate-candidate groups"},
+	{"log", "print the mutation log"},
+	{"status", "print where the library stands"},
+	{"config", "manage the config file"},
+	{"doctor", "check Stash, the ledger and access to the library"},
+}
 
 // NewRootCmd builds the root cobra command and attaches all subcommands.
 // version/commit/date are injected by main via ldflags at build time.
 func NewRootCmd(version, commit, date string) *cobra.Command {
 	root := &cobra.Command{
 		Use:     "custodian",
-		Short:   "Custodian — find and resolve duplicate scenes in a Stash library",
+		Short:   "Custodian — keep one best copy of every scene in a Stash library",
 		Version: version,
-		Long: `custodian is a CLI for safely deduplicating videos managed by Stash (stashapp/stash).
+		Long: `custodian removes bloat from a library managed by Stash: every scene exists
+once, as the best copy you have, and nothing on disk is there twice or larger
+than it needs to be.
 
-It addresses two distinct problems:
-  - Workflow A: cross-scene duplicates (separate Stash scenes with the same content)
-  - Workflow B: within-scene multi-file cleanup (a single scene with multiple attached files)
+It works off a local ledger — a mirror of Stash's scenes and files — so every
+step after ` + "`sync`" + ` is fast and repeatable. Nothing is deleted on the way: a
+loser is quarantined inside the library and only ` + "`prune`" + ` removes it, days
+later, after a verified database backup. Every write is dry-run by default and
+needs both --commit and a typed YES.
 
-All destructive actions go through Stash's GraphQL API. The one exception is
-sidecar files (subtitles): Stash does not index them as files, so its moveFiles
-mutation cannot move them, and custodian relocates those itself. See
-"custodian sidecars check".
-
-The default action is always the safest one: dry-run for apply commands,
-tag-only for cross-scene duplicates, report-only for within-scene files.
-
-See PLAN.md for the full design.`,
+Run the commands in the order below.`,
 		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+			}
+			printChain(cmd.OutOrStdout())
+			return nil
+		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			setupLogger(cmd.ErrOrStderr(), flagVerbose)
 			return nil
@@ -49,33 +74,39 @@ See PLAN.md for the full design.`,
 	root.SetVersionTemplate(fmt.Sprintf("Custodian %s (commit: %s, built: %s)\n", version, commit, date))
 
 	root.PersistentFlags().StringVar(&flagConfigPath, "config", "", "path to config file (default: ~/.config/custodian/config.yaml or ./config.yaml)")
-	root.PersistentFlags().StringVar(&flagDBPath, "db", "", "path to local sqlite cache (default: ~/.local/share/custodian/ or ./custodian.sqlite)")
 	root.PersistentFlags().CountVarP(&flagVerbose, "verbose", "v", "increase log verbosity (-v info, -vv debug)")
 
-	root.AddCommand(newConfigCmd())
-	root.AddCommand(newScenesCmd())
-	root.AddCommand(newFilesCmd())
-	root.AddCommand(newOrphansCmd())
-	root.AddCommand(newOrganizeCmd())
-	root.AddCommand(newSidecarsCmd())
-	root.AddCommand(newSubsCmd())
-	root.AddCommand(newStatsCmd())
-	root.AddCommand(newReviewCmd())
 	root.AddCommand(newSyncCmd())
-	root.AddCommand(newStatusCmd())
 	root.AddCommand(newScanCmd())
-	root.AddCommand(newGroupsCmd())
+	root.AddCommand(newCanonCmd())
+	root.AddCommand(newRejudgeCmd())
 	root.AddCommand(newPlanCmd())
 	root.AddCommand(newApplyCmd())
 	root.AddCommand(newPruneCmd())
 	root.AddCommand(newUndoCmd())
-	root.AddCommand(newLogCmd())
-	root.AddCommand(newCanonCmd())
-	root.AddCommand(newRejudgeCmd())
 	root.AddCommand(newFileCmd())
 	root.AddCommand(newCaptionsCmd())
+	root.AddCommand(newGroupsCmd())
+	root.AddCommand(newLogCmd())
+	root.AddCommand(newStatusCmd())
+	root.AddCommand(newConfigCmd())
+	root.AddCommand(newDoctorCmd())
 
 	return root
+}
+
+// printChain writes the chain, one line per command, in run order.
+func printChain(w io.Writer) {
+	fmt.Fprintln(w, "custodian — one best copy of every scene, nothing on disk twice.")
+	fmt.Fprintln(w)
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, c := range chain {
+		fmt.Fprintf(tw, "  %s\t%s\n", c.name, c.what)
+	}
+	_ = tw.Flush()
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Every write is a dry run until you pass --commit.")
+	fmt.Fprintln(w, "`custodian <command> --help` for flags; MANUAL.md for the whole story.")
 }
 
 // setupLogger installs a slog default handler whose level depends on -v count:

@@ -10,7 +10,7 @@ import (
 	"unicode"
 
 	"github.com/Anastylosis/Custodian/internal/config"
-	"github.com/Anastylosis/Custodian/internal/stash"
+	stash "github.com/Anastylosis/stash-go"
 )
 
 // maxPathLen is the maximum total path length we'll produce. Paths longer
@@ -20,7 +20,7 @@ const maxPathLen = 240 // leave room for the _{id}.ext suffix
 // ComputeTargetPath applies the path template to a scene's metadata and
 // returns the full target path (base_dir + rendered template). Returns ""
 // and a reason if the scene lacks required fields.
-func ComputeTargetPath(scene *stash.Scene, file *stash.VideoFile, cfg *config.OrganizeConfig) (string, string) {
+func ComputeTargetPath(scene *stash.Scene, file *stash.File, cfg *config.OrganizeConfig) (string, string) {
 	vars := extractVars(scene, file, cfg)
 
 	// Check required fields.
@@ -44,7 +44,7 @@ func ComputeTargetPath(scene *stash.Scene, file *stash.VideoFile, cfg *config.Or
 }
 
 // extractVars builds the {variable} → value map from scene metadata.
-func extractVars(scene *stash.Scene, file *stash.VideoFile, cfg *config.OrganizeConfig) map[string]string {
+func extractVars(scene *stash.Scene, file *stash.File, cfg *config.OrganizeConfig) map[string]string {
 	vars := map[string]string{
 		"id":         scene.ID,
 		"title":      scene.Title,

@@ -1,425 +1,737 @@
 # Custodian User Manual
 
+Custodian keeps one best copy of every scene in a Stash library. This manual
+covers every command, the config file, the safety model, and the Stash
+behaviours it is built around.
+
+If you only read one thing, read [Safety model](#safety-model).
+
+- [Install](#install)
+- [First-time setup](#first-time-setup)
+- [The chain](#the-chain)
+- [Commands](#commands)
+- [Configuration reference](#configuration-reference)
+- [Safety model](#safety-model)
+- [Reviewing in Stash](#reviewing-in-stash)
+- [Sidecar files (subtitles)](#sidecar-files-subtitles)
+- [Known Stash behaviours](#known-stash-behaviours)
+- [Troubleshooting](#troubleshooting)
+
 ## Install
 
-**Download a release binary** from the
-[Releases](https://github.com/Anastylosis/Custodian/releases) page — no
-Go toolchain required. Extract and you're ready.
-
-Or build from source:
 ```sh
-git clone https://github.com/Anastylosis/Custodian.git
-cd Custodian
-go build -o custodian ./cmd/custodian
+brew install anastylosis/tap/custodian     # macOS and Linux
+yay -S custodian                           # Arch (AUR)
+sudo dpkg -i custodian_*_amd64.deb         # Debian / Ubuntu
+sudo rpm -i custodian_*_amd64.rpm          # Fedora / RHEL
 ```
 
-Or via `go install`:
+Or download a binary from
+[Releases](https://github.com/Anastylosis/Custodian/releases), or build:
+
 ```sh
+go build -o custodian ./cmd/custodian
 go install github.com/Anastylosis/Custodian/cmd/custodian@latest
 ```
 
-The binary is fully self-contained (pure-Go SQLite, no cgo, no runtime deps).
-Put it wherever you like — a dedicated directory is handy because it also
-creates `config.yaml` and `custodian.sqlite` next to itself.
+The binary is self-contained: pure-Go SQLite, no cgo, no runtime dependencies.
 
 ## First-time setup
 
 ```sh
-# 1. Generate a config file in the current directory.
+# 1. Write a config file.
 custodian config init
+# wrote default config to ~/.config/custodian/config.yaml
+
+# 2. Point it at your Stash.
+$EDITOR ~/.config/custodian/config.yaml
+#   stash:
+#     url: http://your-nas:9999
+
+# 3. If your Stash has an API key, export it. It is never written to the
+#    config file — only the name of the env var is.
+export STASH_API_KEY=...
+
+# 4. Check that everything Custodian needs is reachable.
+custodian doctor
 ```
 
-This creates `config.yaml` with commented defaults. Open it and set
-your Stash URL:
+`custodian config path` prints which file is in use. Resolution order:
+`--config`, then `./config.yaml` if it exists, then
+`~/.config/custodian/config.yaml`.
 
-```yaml
-stash:
-  url: http://your-nas:9999     # ← change this to your Stash address
-  api_key_env: STASH_API_KEY    # reads the API key from this env var
+The ledger — the SQLite mirror of your library — lives at
+`./custodian.ledger.sqlite` if that file exists, otherwise
+`~/.local/share/custodian/custodian.ledger.sqlite`. Every command takes
+`--ledger` to override it. At 61k scenes the file is about 65 MB.
+
+## The chain
+
+```
+sync → scan → canon → rejudge → plan → apply → prune
 ```
 
-The default is `http://localhost:9999`. If your Stash has no API key
-configured, you can leave `STASH_API_KEY` unset.
+Each step reads what the last one wrote into the ledger. `canon` and `rejudge`
+are optional and only matter for groups whose copies disagree on runtime.
+`undo` reverses an `apply`. `file` and `captions` are hygiene that rides along
+with the library rather than steps in the chain.
+
+Running `custodian` with no arguments prints this list.
+
+## Commands
+
+### `custodian sync`
+
+Mirrors Stash's scenes and files into the ledger.
+
+Incremental by default: only scenes whose `updated_at` is newer than the last
+sync's high-water mark are fetched. A first full sync of 61k scenes takes
+under a minute; an incremental one that finds nothing takes milliseconds.
+
+Incremental sync cannot see a scene that was deleted from Stash outright —
+there is no `updated_at` event for "this row is gone". Run `--full`
+periodically, and after any bulk deletion in Stash, so what vanished gets
+tombstoned. Tombstoned rows are kept, never deleted, so the mutation log
+keeps its referent.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--full` | off | resync everything and tombstone what is gone |
+| `--per-page N` | 500 | scenes fetched per page |
+| `--ledger PATH` | — | ledger file to use |
+
+```
+sync (incremental)
+  since:    2026-08-28T08:50:29Z
+  pages:    1
+  scenes:   0
+  files:    0
+  gone:     0
+  duration: 0s
+```
+
+### `custodian scan`
+
+Runs the evidence generators against the ledger and judges each group.
+
+Generators emit *evidence*, not verdicts. A group accumulates evidence from
+all of them, and a policy reads the whole picture.
+
+| Generator | Signal |
+|---|---|
+| `stash_id` | two scenes point at the same stash-box entry — near-proof of identity |
+| `phash` | Stash's own `findDuplicateScenes`: perceptual distance plus duration delta |
+| `multifile` | one scene holding several files (Stash attaches those by hash, so they are byte-equivalent) |
+| `filename` | structured filenames agree after normalisation |
+| `title_date` | title, date and studio agree; duration corroborates but never decides alone |
+
+Verdicts:
+
+| Verdict | Meaning |
+|---|---|
+| `certain` | shared `stash_id`, runtimes agree within tolerance — safe to auto-decide |
+| `conflicted` | shared `stash_id`, runtimes disagree — held for review, or for `canon` |
+| `probable` | phash and duration close, metadata corroborating — review only |
+| `partial` | one copy matches the canonical runtime, the other is materially shorter: a clip, a trailer, or one part of a split |
+| `mistag` | neither copy matches canonical, or one is *longer* than canonical. The fix is metadata, not deletion |
+| `rejected` | evidence contradicts — different `stash_id`s from the same endpoint. Kept visible: it is a candidate stash-box mis-tag |
+| `dismissed` | you marked it not-a-duplicate |
+
+Only `certain` and `partial` groups are planned and applied by default.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--generators LIST` | all five | comma-separated generators to run |
+| `--tolerance-pct F` | 2 | duration tolerance as a percent of the longer runtime |
+| `--tolerance-seconds F` | 120 | flat seconds cap on that tolerance |
+| `--ledger PATH` | — | ledger file to use |
+
+"Durations agree" means within `min(pct, seconds)`. The default `min(2%, 120s)`
+is stash-catalog-sync's empirically tested threshold. Loosening it to 10%
+moves groups from `conflicted` to `certain` — on the reference library, 656
+certain at the default versus 843 at 10% — which is a decision about how much
+you trust a shared `stash_id` on its own.
+
+Every generator but `phash` reads only the ledger. `phash` calls Stash live
+(read-only); without a reachable server it is skipped with a note.
+
+### `custodian canon`
+
+Fetches a scene's true runtime from an authority outside your library, so
+`rejudge` can tell a trimmed copy from a clip from a mis-tag.
+
+Two sources, both optional; configure whichever you have:
+
+- **stash-box** — `scrapeMultiScenes` against a configured endpoint. On a
+  30-scene sample against StashDB, 29 matched.
+- **FSS** — an [FSS](https://github.com/Anastylosis/FSS) catalogue, read from
+  its SQLite database and/or its JSON exports. Matching is exact-key on
+  normalised title plus date, so its hit rate is lower but its answers are
+  unambiguous.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--source NAME` | all configured | `stash-box`, `fss`, or empty for every source |
+| `--endpoint URL` | `sources.stash_box_endpoint` | which stash-box to ask |
+| `--fss-db PATH` | `sources.fss.db` | FSS's SQLite database |
+| `--fss-json DIR` | `sources.fss.json_dir` | directory of FSS's `*.json` exports |
+| `--verdict NAME` | `conflicted` | which groups' scenes need a runtime |
+| `--limit N` | 0 | cap how many scenes are looked up |
+
+`canon` only fetches and stores. `rejudge` is what acts on the results.
+
+### `custodian rejudge`
+
+Re-classifies every live `conflicted` and `certain` group whose scenes all
+have a canonical runtime:
+
+- every scene matches canonical → `certain`
+- one matches and the rest are materially shorter → `partial`
+- any scene is *longer* than canonical, or sources disagree → `mistag`
+
+A copy within the *trimmed* threshold of canonical — a cut intro or outro —
+counts as the same scene and competes on quality. Beyond it, completeness wins
+outright: a 1080p copy at half the runtime loses to a complete 720p one.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--trimmed-pct F` | 5 | trimmed tolerance as a percent of canonical |
+| `--trimmed-seconds F` | 90 | flat seconds cap on that tolerance |
+
+Read-only against Stash: `rejudge` only reads and writes the ledger.
+
+### `custodian plan`
+
+Chooses the keeper in every group and reports why.
+
+"Best copy" is decided pairwise, in this order, and a difference below a
+rule's threshold is a tie that falls through to the next rule:
+
+1. **completeness** — a `partial` copy never competes on quality at all
+2. **resolution tier** — 1080-tier beats 720-tier; 1920×1080 and 1920×1088 tie
+3. **bitrate**, above a significance threshold
+4. **codec preference**
+5. **file size**, above a threshold
+6. **filed location** — the file already under the organize template's base
+7. **older scene id** — the terminal tiebreak
+
+Metadata richness is deliberately not a rule: `apply` unions the losers'
+metadata onto the keeper first, so the richer copy loses nothing by losing.
+
+```
+group 002fb8ae959b… (certain)
+  keeper: 73419 · 4K · 25.6 Mbps · 6.44 GiB · 2025-09-11_Shay.Sights-…_4k.mp4
+  loser:  77765 · 1080p · 12.3 Mbps · 3.10 GiB · 2025-09-11_Shay.Sights-…_1080p.mp4
+  tier: 4K vs 1080p → 73419 wins
+  reclaimable: 3.10 GiB
+```
+
+The last line before `reclaimable` names the rule that actually decided it, in
+its own terms — not a rule name and a shrug. On the reference library's 656
+certain groups: tier decided 302, bitrate 228, codec 12, size 1, location 19,
+and the terminal scene-id tiebreak 94.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--verdict NAME` | `certain` | which verdict to plan: `certain`, `conflicted`, `dismissed`, `partial` |
+| `--limit N` | 0 | cap how many groups are planned |
+| `--json` | off | emit the planned groups as JSON |
+
+`plan` never calls Stash and never touches a file.
+
+### `custodian apply`
+
+Acts on the plan. **Dry run by default.**
+
+1. Downloads a **verified** database backup and refuses to continue without
+   one. The manifest is kept beside it.
+2. Unions each loser's metadata onto the keeper via `sceneUpdate`. The keeper
+   is complete from this point.
+3. Tags every loser `_custodian_quarantine`, moves its file into the
+   quarantine directory with `moveFiles`, and moves its subtitles after it.
+
+Scenes in a `mistag` group are tagged `_custodian_mistag` instead, and nothing
+is moved: the fix there is metadata, not deletion.
+
+Nothing is deleted. The loser scene stays in Stash carrying its tag.
+
+```
+=== custodian apply (DRY RUN) ===
+quarantine: /data/_quarantine
+tag:        _custodian_quarantine
+backup:     would download a verified backup to ~/.local/share/custodian/backups first
+
+group 009feb303cf8… keeper 78859
+  union:   would sceneUpdate scene 78859: tag_ids
+  loser 50753 (174.55 MiB)
+    tag:     would add
+    move:    /data/Lisa Ann/2014-04-19_Lisa.Ann-Afternoon.Tease_480p.mp4 → /data/_quarantine/…
+  reclaimable: 174.55 MiB
+
+would quarantine: 3 groups, 3.85 GiB reclaimable once pruned
+skipped:    0 groups
+failed:     0 groups
+
+DRY RUN — nothing was sent to Stash, nothing moved on disk, and the
+mutation log is untouched. Re-run with --commit to act on this plan.
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--commit` | off | actually write to Stash and move files |
+| `--yes` | off | skip the interactive YES prompt (still needs `--commit`) |
+| `--quarantine-dir PATH` | `quarantine.dir` | where losers' files go, in the server's path notation |
+| `--backup-dir PATH` | `quarantine.backup_dir` | where the verified backup is written |
+| `--limit N` | 0 | cap how many groups are acted on |
+
+A commit run also writes `<backup-name>.changes.json` beside its backup: per
+group, the keeper's pre-union field values, each loser's original path, the
+sidecars moved, and the tag added.
+
+### `custodian prune`
+
+The only irreversible step, and it runs on nothing that was not first
+quarantined and logged. **Dry run by default.**
+
+For every group `apply` quarantined more than `--age` ago, whose losers still
+carry the quarantine tag:
+
+1. take a verified database backup;
+2. `sceneMerge` the losers into the keeper, which carries their play history;
+3. `deleteFiles` their videos from disk.
+
+A loser someone un-tagged in Stash has been rescued, and its whole group is
+left alone. Deleting the quarantine directory by hand also works — Stash's
+next clean drops the scenes.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--age D` | `30d` | how long a quarantine must have sat |
+| `--commit` | off | actually merge and delete |
+| `--yes` | off | skip the interactive YES prompt |
+| `--backup-dir PATH` | `quarantine.backup_dir` | where the verified backup is written |
+| `--limit N` | 0 | cap how many groups are acted on |
+
+`prune` is not undoable. Its verified backup is its reversal.
+
+### `custodian undo`
+
+Reverses what `apply` did to one group — or, with `--run`, to every group one
+apply invocation quarantined — by reading what it wrote to the mutation log.
+**Dry run by default.**
+
+1. Remove the quarantine tag from each loser.
+2. Move each loser's file back to its recorded original path, refusing if a
+   different file now occupies it, and move its subtitles with it.
+3. Restore the keeper's recorded pre-union field values, skipping any field
+   someone has changed since the apply rather than overwriting it.
+
+`undo` never adds anything. Only a group still in the `quarantined` verdict
+can be undone; `prune` has already merged and deleted a `reclaimed` one.
 
 ```sh
-# 2. (Optional) If your Stash uses an API key:
-export STASH_API_KEY=your-key-here
+custodian undo 009feb303cf8            # one group, by signature
+custodian undo --run 14                # everything one apply run quarantined
+custodian undo --run 14 --commit
 ```
 
-The config file and the SQLite cache (`custodian.sqlite`) are
-created in whatever directory you run the command from. You can override
-their locations with `--config <path>` and `--db <path>`.
+### `custodian file`
 
-To verify connectivity and see your library at a glance:
+Moves and renames files so the library has a consistent directory structure,
+computed from a template and the scene's metadata.
+
+Video moves go through Stash's `moveFiles`; sidecars travel with them.
+Scenes that are the losing side of a quarantined or partial duplicate group
+are skipped — they are about to leave the library.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--commit` | off | actually move files |
+| `--yes` | off | bypass the interactive YES prompt |
+| `--limit N` | 0 | cap how many scenes are considered |
+
+Scenes missing any of `organize.required_fields` (performer and date by
+default) are left where they are. On the reference library, a full dry run
+over 61,217 scenes takes under a second and reports 1,040 to move, 528 to
+rename, 26,914 already filed, 31,980 with no usable metadata, and 755
+conflicts — target paths two scenes both want, which you should inspect
+before any commit.
+
+### `custodian captions`
+
+Matches loose subtitle files — ones that were never named after their video —
+back to scenes, and moves them into place.
 
 ```sh
-custodian stats
+custodian captions scan  --dir /data/webm
+custodian captions scan  --dir ~/Downloads/Subs --json report.json
+custodian captions apply --dir /data/webm --commit
 ```
 
-This shows Stash version, total scenes, library size, percentage with
-metadata, orphan count, and the state of each workflow's local cache.
-It also warns if cached scenes no longer exist in Stash (stale cache).
+`--dir` can point anywhere. A directory that exists on this machine is read
+locally; otherwise it is treated as a path on the library backend and
+translated through `sidecars.path_map`. Subtitles and library can be on
+different machines: apply streams each file across and removes the original,
+landing on a temporary name first so a half-written subtitle is never indexed
+as a valid caption.
 
-## The three workflows
+| Flag | Default | Meaning |
+|---|---|---|
+| `--dir PATH` | — | folder holding the subtitles |
+| `--recursive` | on | descend into subdirectories |
+| `--candidates N` | 3 | how many candidates to show per subtitle (`scan`) |
+| `--json PATH` | — | also write the full result to this file (`scan`) |
+| `--include-likely` | off | also move LIKELY matches, not just CONFIRMED (`apply`) |
+| `--commit` | off | actually move files (`apply`) |
 
-custodian has three independent workflows. Run whichever ones apply to you —
-they don't depend on each other.
+#### How matching works
 
----
+Filenames alone are not enough. These are real pairs:
 
-### Workflow A: Cross-scene duplicates
+```
+StudioHandleXXX_Mommy-and-Son-Nesting-Season+(transcribed+on+25-Jul-2024).srt
+  → 2023-05-23_Some.Performer-stepMommy.and.stepSon.Nesting.Season_1080p.mp4
 
-**Problem:** Two separate Stash scenes contain the same video, maybe at
-different resolutions or bitrates.
+thehousenextdoor2024 - The Reluctant Dog Sitter - Compressed.srt
+  → The-Reluctant-Pet-Sitter-Part-1.mp4
+```
 
-**What custodian does:** Asks Stash for perceptually-similar scene groups (via
-phash), scores each group to pick a keeper, and lets you tag, merge, or
-delete the losers.
+Independent signals are combined:
 
-#### 1. Scan
+| Signal | Weight | Notes |
+|---|---|---|
+| Studio / JAV code | +60 | `VENU-765`, `RCTD-590` — near-decisive when present |
+| Exact filename | +100 | the subtitle is already named after the video |
+| Name similarity | +0…70 | scene **title** and **filename** scored separately, better wins |
+| **Runtime** | +0…45, −30 | the subtitle's last cue against the scene duration |
+| Matching date | +25 | `YYYY-MM-DD` in the filename against the scene date |
+| Creator agreement | +20 | narrows the field; never decides on its own |
+
+**Title and filename are compared independently.** Libraries carry the
+identifying information in one place or the other: in a measured 61k-scene
+library 52% of scenes had no title at all and relied entirely on a structured
+filename, while a stash-box-tagged library is the reverse — good titles beside
+filenames like `1080p.wmv`. Scoring a merged blob served neither. The report
+says which won: `title 100%` or `filename 57%`.
+
+**Creator names come from your own library.** Performer and studio names plus
+their aliases are fetched from Stash and squashed into handles, split out of
+name similarity so two unrelated clips by one creator do not look alike.
+Nothing is hard-coded, so it stays correct as the library grows.
+
+**Runtime is what makes this trustworthy.** Two scenes can share a title, a
+performer and a studio, but not a length:
+
+```
+Nurse+River+Soothes+the+Aching+Patient+WM+(transcribed…).srt   10:52
+  → #55739  Nurse River Soothes the Aching Patient   10:54   +2s     ✓
+    #75175  Nurse River Soothes the Aching Patient   33:49   +1377s  ✗
+```
+
+Names were a dead tie; runtime was not. A subtitle running *past* the end of a
+video counts as evidence against the pairing, though a few seconds of overrun
+is tolerated — the measurement takes the maximum timestamp, which includes cue
+end times.
+
+#### Verdicts
+
+| Verdict | Meaning | `captions apply` |
+|---|---|---|
+| `CONFIRMED` | name and runtime agree, no rival close | moved |
+| `LIKELY` | good evidence, weaker on one axis | moved only with `--include-likely` |
+| `AMBIGUOUS` | several candidates too close to separate | left alone |
+| `UNMATCHED` | nothing credible in the library | left alone |
+
+The gap to the runner-up matters as much as the absolute score: a high score
+with a near-tie is exactly where an automatic choice would be wrong, so it is
+reported as `AMBIGUOUS` for you to settle.
+
+Each moved file is named `<video-stem>.<lang>.srt`, and the language is
+detected from the subtitle's **own text**, not its filename. Script detection
+handles CJK, Hangul and Cyrillic; Latin-script languages are separated by
+function-word frequency. A subtitle whose language cannot be determined is
+left alone rather than guessed at — a wrong caption tag is worse than none.
+
+Stash only reads `srt` and `vtt` captions. Other formats in
+`sidecars.extensions` are still moved so they travel with their video, but
+Stash will not display them.
+
+### `custodian groups`
+
+Lists duplicate-candidate groups from the last scan, with the evidence.
+
+```
+group 00558d6a4f3a… (conflicted)
+  reason: 2454.06s vs 2672.64s
+  scenes:
+    67994 · 40m54s · 1.99 GiB · 2016-10-20_Lauren.Phillips-…_1080p_1.mp4
+    9904 · 44m33s · 3.78 GiB · 2016-10-20_Lauren.Phillips-…_1080p.mp4
+  reclaimable: 1.99 GiB
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--verdict NAME` | all | filter to one verdict |
+| `--limit N` | 0 | cap how many groups are printed |
+| `--json` | off | emit as JSON |
+
+Two subcommands overrule the policy:
 
 ```sh
-custodian scenes scan
+custodian groups dismiss 00558d6a4f3a --reason "different scenes, same title"
+custodian groups restore 00558d6a4f3a
 ```
 
-This calls `findDuplicateScenes` on your Stash. At distance=4 (default)
-it catches re-encodes; at distance=0 it only catches exact phash matches.
+`dismiss` records the decision against the group's **file hashes**, not its
+scene ids — scene ids die on a merge and change on a rescan, so a decision
+keyed on one would not survive the thing it was made about. Every `scan`
+re-reads these decisions and re-dismisses the group it rebuilds. `restore`
+clears the decision so the group is judged again on the next scan.
 
-Takes ~2 seconds even at 60k scenes. All results are stored locally in
-`custodian.sqlite` — no need to re-scan unless your library changes.
+The signature argument accepts the truncated prefix `groups` prints, ellipsis
+and all, as long as it is unique; an ambiguous prefix is refused rather than
+guessed at.
 
-Useful flags:
-- `--distance 0` — strictest (byte-equivalent phash only)
-- `--distance 8` — aggressive (more matches, more false positives)
-- `--max-groups 100` — process only the first 100 groups (useful for testing)
+### `custodian log`
 
-#### 2. Review
+Prints the mutation log, newest first: every write Custodian made, recorded
+before it was sent and stamped with its outcome afterwards, so a run that died
+mid-way still shows what it was attempting. A dry run writes nothing here.
 
-```sh
-# One-line summary.
-custodian scenes status
+| Flag | Default | Meaning |
+|---|---|---|
+| `--limit N` | 50 | how many entries to print (0 = all) |
 
-# Detailed per-group report. Each loser shows WHY it lost.
-custodian scenes report --filter decided | less
+### `custodian status`
 
-# Only groups the tool couldn't auto-decide:
-custodian scenes report --filter needs-review
+The headline numbers. See the [README](README.md#status) for a full example.
 
-# Machine-readable:
-custodian scenes report --json > groups.json
+`--json` emits the same figures as a JSON object.
+
+### `custodian config`
+
+| Subcommand | What it does |
+|---|---|
+| `init` | write a default config file, refusing to overwrite an existing one |
+| `path` | print the config file path in use |
+| `show` | print the *effective* config: defaults merged with your overrides |
+| `validate` | check the file for retired keys and bad values |
+
+`validate` exists because YAML has no notion of a key that used to mean
+something. yaml.v3 silently drops a key with no matching field, so a config
+written for an older Custodian keeps loading and quietly stops meaning
+anything. `validate` names each retired key and what replaced it:
+
+```
+~/.config/custodian/config.yaml
+
+  apply     retired — `apply` has one behaviour: union, tag, quarantine. It
+            is a dry run unless you pass --commit. The loser and keeper tags
+            are quarantine.tag and quarantine.mistag_tag
+  merge     retired — the union policy comes from stash-go
+            (DefaultUnionPolicy) so every project here merges scenes the same
+            way
+  scoring   retired — the keeper rules are built in and ordered resolution
+            tier -> bitrate -> codec -> size -> filed location -> older scene
+            id; `custodian plan` quotes which one decided each group…
 ```
 
-Example output:
-```
-#2  status=decided
-    signature: 22871|83186
-      KEEP  scene 22871     3840x2160  h264    3.90 GiB  [stashID,tags=12,perf=1] /data/.../4k.mp4
-      drop  scene 83186     1920x1080  h264    528.48 MiB  [stashID,tags=12,perf=1] /data/.../1080p.mp4
-                ↳ kept by: higher resolution: 3840x2160 vs 1920x1080
-    reclaimable: 528.48 MiB
-```
+### `custodian doctor`
 
-#### 3. Override (optional)
+Read-only. Checks that Stash answers, that the ledger is readable, that the
+sidecar backend opens, and that `sidecars.path_map` resolves real library
+paths to readable ones. Run it after editing the config, and before the first
+`--commit`.
 
-If the tool picked wrong, tell it. You can use the group `#` from the
-report (easier) or the full signature:
-
-```sh
-# By group number from the report:
-custodian scenes mark --group 224 --as not_duplicate
-
-# Or by full signature:
-custodian scenes mark --signature "22871|83186" --as not_duplicate
-
-# Pin a specific keeper (overrides the scorer's pick):
-custodian scenes mark --group 224 --as force_keeper --keeper 83186
-
-# Then re-scan to apply the override:
-custodian scenes scan
-```
-
-#### 4. Apply
-
-Three action modes, from safest to most aggressive:
-
-**Tag (safest — no data loss possible):**
-```sh
-custodian scenes apply --action tag              # preview (dry run)
-custodian scenes apply --action tag --commit     # actually tag in Stash
-```
-Adds `_dedupe_loser` / `_dedupe_keeper` tags. Then go to Stash UI, filter
-by `_dedupe_loser`, eyeball, bulk-delete what you agree with.
-
-**Merge (recommended — preserves all metadata):**
-```sh
-custodian scenes apply --action merge              # preview
-custodian scenes apply --action merge --commit     # interactive YES prompt
-custodian scenes apply --action merge --commit --yes  # scripted/cron
-```
-Per group, the merge pipeline:
-1. Computes a metadata union (tags, performers, stash_ids, urls, play
-   history, rating, organized).
-2. **Filename metadata extraction**: if the keeper has no title/date but a
-   loser file has a structured filename like
-   `2024-12-15_Performer-Title_1080p.mp4`, parses the date and title and
-   fills them in before merging.
-3. Calls `sceneMerge` with the computed union as `values`.
-4. Picks the best file as primary (resolution → bitrate → filename → size).
-5. **Rename-on-merge**: if the winning file has a junk basename but a loser
-   had a structured one, renames the winner via `moveFiles` to use the
-   loser's filename (with the resolution token swapped to match).
-6. Deletes the loser files from disk.
-
-**Delete (destructive — use only when losers have nothing to preserve):**
-```sh
-custodian scenes apply --action delete --commit
-```
-Calls `scenesDestroy(delete_file: true)` on every loser. No metadata
-preservation. No rename. You see a warning explaining why merge is
-better in most cases.
-
-**Submit fingerprints to stash-box (optional, any mode):**
-```sh
-custodian scenes apply --action tag --commit --submit-fingerprints
-```
-After a successful commit, sends the keeper scenes' fingerprints to
-stash-box so future users who have the same files get automatic matches.
-
----
-
-### Workflow B: Within-scene multi-file cleanup
-
-**Problem:** A single Stash scene has 2+ files attached (Stash auto-
-attaches files with the same oshash/md5). Only one file is needed.
-
-**What custodian does:** Scores the files by filename quality, path priority,
-and modification time. Picks the best one as primary, deletes the rest.
-
-```sh
-custodian files scan
-custodian files status
-custodian files report | less                # each loser shows WHY it lost
-custodian files apply                        # preview
-custodian files apply --commit               # interactive YES → delete losers
-custodian files apply --commit --yes         # scripted
-```
-
-The filename scoring uses a configurable regex. The default matches your
-`YYYY-MM-DD_Performer-Title_Resolution.ext` convention, including import
-suffixes (`_1080p_1.mp4`) and resolutions up to 8K. Files matching the
-convention win over files that don't. Each loser line in the report shows
-`↳ kept by: matches filename convention (loser does not)` or whichever
-rule decided.
-
-Override a specific scene:
-```sh
-custodian files mark --scene-id 56297 --as keep_all
-```
-
----
-
-### Workflow C: Orphans — stash-box metadata lookup
-
-**Problem:** Many scenes have no stash-box metadata (no stash_ids). The
-filename is the only clue to what the scene is.
-
-**What custodian does:** Enumerates orphan scenes (stash_id_count = 0), queries
-your configured stash-box by phash, stores matches locally for review.
-Applying writes the stash_id link back to Stash so Stash's built-in
-Scene Tagger can then pull the full metadata.
-
-```sh
-# Start small — this is the slow workflow.
-custodian orphans scan --max-scenes 500
-
-# See what stash-box recognized.
-custodian orphans report --filter matched
-
-# Link the matches back to Stash.
-custodian orphans apply --commit
-
-# Then in Stash UI: run the Scene Tagger to pull metadata
-# (title, performers, tags, studio, date) from stash-box.
-
-# Later, scan the rest. Re-runs skip already-queried scenes.
-custodian orphans scan --max-scenes 5000
-custodian orphans scan                       # full library (may take 30+ min)
-```
-
-Useful flags:
-- `--endpoint URL` — query a specific stash-box (default: first one in Stash config)
-- `--endpoint all` — query **every** configured stash-box in one pass
-- `--batch-size 50` — bigger batches (faster, heavier on stash-box)
-- `--batch-delay 100ms` — less sleep between batches
-- `--rescan` — re-query previously-looked-up orphans
-
-The endpoint is auto-discovered from Stash's configuration if not passed.
-
-During the scan, a progress line shows processed/total, matched count,
-and estimated time remaining:
-```
-  progress: 500/33249 (2%)  matched: 5  no_match: 395  skipped: 100  elapsed: 42s  eta: 35m
-```
-
----
-
-## The local cache (custodian.sqlite)
-
-Every scan stores its results in a SQLite file (default `./custodian.sqlite`).
-This serves three purposes:
-
-1. **Speed.** Reports and apply commands read from SQLite, not Stash.
-   You can scan once and review over multiple days.
-
-2. **Resume.** `orphans scan --max-scenes 500` processes 500, then stops.
-   Next run starts where you left off. `scenes scan` re-uses your `mark`
-   overrides across runs.
-
-3. **Idempotency.** Applied groups are recorded. Re-running `apply` is
-   safe — already-applied groups are skipped.
-
-You can delete `custodian.sqlite` at any time and re-scan. All source-of-truth
-data lives in Stash; the SQLite is a read cache and decision journal.
-
-**Stale-cache detection:** `custodian stats` samples a few cached scene IDs
-and warns if any no longer exist in Stash. If you see the warning, just
-re-scan (`custodian scenes scan`, `custodian files scan`).
+| Flag | Default | Meaning |
+|---|---|---|
+| `--sample N` | 5 | how many real library paths to test the mapping against |
+| `--path PATH` | — | test one Stash path instead of sampling |
 
 ## Configuration reference
 
-`custodian config init` generates a fully-commented `config.yaml`. Key sections:
+`custodian config init` writes a fully commented file; every field is
+documented inline in
+[`internal/config/default.yaml`](internal/config/default.yaml). The shape:
 
-| Section | What it controls |
+```yaml
+stash:
+  url: http://localhost:9999
+  api_key_env: STASH_API_KEY     # name of the env var, never the key itself
+
+scan:
+  phash_distance: 4              # used by the phash generator only
+  duration_diff_seconds: 1.0
+
+organize:
+  base_dir: /data
+  path_template: "{performer}/{date}_{performers}-{title}_{resolution}.{ext}"
+  space_char: "."
+  folder_space_char: " "
+  performer_strategy: first_alphabetical
+  max_performers_in_filename: 3
+  required_fields: [performer, date]
+  rename_in_place: true
+
+sidecars:
+  enabled: true
+  extensions: [srt, ass, ssa, vtt, sub, idx, smi]
+  access: auto                   # auto | local | ssh | off
+  path_map: []
+  ssh: {host: "", port: 22, user: "", key_file: "", …}
+
+quarantine:
+  dir: /data/_quarantine
+  tag: _custodian_quarantine
+  mistag_tag: _custodian_mistag
+  backup_dir: ""                 # empty → ~/.local/share/custodian/backups
+
+sources:
+  stash_box_endpoint: ""
+  fss:
+    db: ""
+    json_dir: ""
+```
+
+### `stash`
+
+The API key is read from the environment variable named in `api_key_env` and
+never written to the config file, never logged, and never stored on the loaded
+config struct. Leave the variable unset if your Stash has no key.
+
+### `scan`
+
+`phash_distance` and `duration_diff_seconds` are passed to Stash's
+`findDuplicateScenes` and affect the `phash` generator only. Distance 0 is
+byte-equivalent perceptual hashes; 4 catches re-encodes; above 8 the false
+positives outnumber the finds. Loosening it is not the way to find more
+duplicates — the `stash_id` signal finds two orders of magnitude more.
+
+The duration tolerances that decide `certain` versus `conflicted` are `scan`
+flags, not config: they are a judgement call you make per run.
+
+### `organize`
+
+Template variables, filled from the scene's metadata:
+
+| Variable | Value |
 |---|---|
-| `stash.url` | Your Stash instance URL |
-| `stash.api_key_env` | Name of env var holding the API key (not the key itself) |
-| `scan.phash_distance` | How aggressively to match (0=exact, 4=re-encodes, 8=aggressive) |
-| `scan.duration_diff_seconds` | Max duration delta — strong false-positive filter |
-| `scoring.scenes.rules` | Ordered rule chain for picking keepers in workflow A |
-| `scoring.files.rules` | Ordered rule chain for picking the best file in workflow B |
-| `scoring.files.filename_quality.pattern` | Regex for "good" filenames |
-| `scoring.codec_priority` | Codec ranking (default: av1 > hevc > h264 > vp9) |
-| `scoring.path_priority` | Path prefix ranking (e.g. /sorted > /inbox) |
-| `apply.scenes.loser_tag` | Tag name for losers (default: `_dedupe_loser`) |
-| `merge.scene_level.*` | How to union metadata during merge (tags: union, title: prefer_keeper, etc.) |
-| `merge.post_merge_file_cleanup.rename_winner_filename` | Rename the winner to the loser's structured basename (default: on) |
-| `organize.base_dir` | Root directory Stash sees (e.g. `/data`) |
-| `organize.path_template` | Template for ideal paths (see Workflow D section) |
-| `organize.space_char` | Space replacement in filenames (default: `.`) |
-| `organize.folder_space_char` | Space replacement in folders (default: ` `) |
-| `organize.performer_strategy` | How to pick primary performer: `first_alphabetical` or `first_listed` |
-| `organize.required_fields` | Fields a scene must have to be moved (default: `[performer, date]`) |
-| `organize.rename_in_place` | Also rename files already in the right folder (default: `true`) |
-| `orphans.write_stash_id_on_apply` | Auto-link stash_ids during orphans apply (default: `false`) |
-| `orphans.write_metadata_on_apply` | Also write title/date from scrape (default: `false`) |
+| `{performer}` | primary performer, per `performer_strategy` |
+| `{performers}` | all performers joined by `_`, omitted entirely above `max_performers_in_filename` |
+| `{studio}` | studio name |
+| `{title}` | scene title |
+| `{date}` | scene date, `YYYY-MM-DD` |
+| `{year}` | the first four characters of the date |
+| `{resolution}` | `480p`, `720p`, `1080p`, `4k`, `8k` |
+| `{ext}` | file extension |
+| `{id}` | Stash scene id — always unique, the fallback |
 
-Run `custodian config show` to see the *effective* config after merging defaults
-with your overrides.
+Folder separators in the template create subdirectories. `space_char` applies
+to filename components, `folder_space_char` to folder names, so
+`Some Performer` can stay a readable folder while becoming
+`Some.Performer` in the filename. Paths are truncated with an `_{id}` suffix
+before they exceed filesystem limits.
 
----
+Two studio-first alternatives, for a Whisparr-compatible layout:
 
-### Workflow D: Organize — move and rename files by metadata
-
-**Problem:** Files are scattered across performer folders and tmp dirs
-with inconsistent names. You want a clean, browsable structure based
-on the metadata in Stash.
-
-**What custodian does:** Computes an ideal path for every scene using a
-configurable template + Stash metadata. Compares ideal vs actual, then
-proposes moves/renames via Stash's `moveFiles` API.
-
-**Recommended order:** run the other workflows first to maximize metadata:
-```sh
-custodian orphans scan          # find stash-box matches for orphans
-# (link matches in Stash UI via Scene Tagger)
-custodian scenes scan           # find and resolve duplicates
-custodian scenes apply --action merge --commit
-custodian files scan            # clean up multi-file scenes
-custodian files apply --commit
-# NOW organize:
-custodian organize scan
-custodian organize report | less
-custodian organize apply --commit
-```
-
-#### Scan
-
-```sh
-custodian organize scan                    # all scenes (can take a while at 60k)
-custodian organize scan --max-scenes 500   # test with a small sample first
-```
-
-For each scene, custodian checks: does the scene have the required metadata
-fields (performer + date by default)? If yes, compute the ideal path
-from the template. If no, skip (leave the file where it is).
-
-#### Report
-
-```sh
-custodian organize report                    # proposed moves + renames (default)
-custodian organize report --filter all       # everything including skips
-custodian organize report --filter conflict  # two scenes → same target path
-custodian organize report --filter skip      # files without enough metadata
-```
-
-Example output:
-```
-[move] scene 20
-  from: /data/unsorted/2018-11-09_Some.Performer-Some.Title_720p.mp4
-  to:   /data/Some Performer/2018-11-09_Some.Performer-Some.Title_720p.mp4
-
-[rename] scene 49
-  from: /data/Addie Andrews/2020-02-03_Addie.Andrews-Complicit.Consumption_544p.mp4
-  to:   /data/Addie Andrews/2020-02-03_Addie.Andrews-Complicit.Consumption_720p.mp4
-```
-
-#### Apply
-
-```sh
-custodian organize apply                     # dry-run preview
-custodian organize apply --commit            # interactive YES → moveFiles via Stash
-custodian organize apply --commit --yes      # scripted
-```
-
-#### Templates
-
-The default template matches your naming convention:
 ```yaml
-organize:
-  path_template: "{performer}/{date}_{performer}-{title}_{resolution}.{ext}"
+path_template: "{studio}/{date} - {title}/{date}_{performer}-{title}_{resolution}.{ext}"
+path_template: "{studio}/{date}_{performer}-{title}_{resolution}.{ext}"
 ```
 
-Result: `/data/Some Performer/2024-12-15_Some.Performer-A.Long.Scene.Title_1080p.mp4`
+`base_dir` is also what the keeper's location tiebreak reads: a file already
+under it counts as filed.
 
-For **Whisparr compatibility**, uncomment the studio-first template in
-`config.yaml`:
-```yaml
-organize:
-  path_template: "{studio}/{date} - {title}/{date}_{performer}-{title}_{resolution}.{ext}"
-```
+### `quarantine`
 
-Result: `/data/Some Studio/2024-12-15 - A Long Scene Title/2024-12-15_Some.Performer-A.Long.Scene.Title_1080p.mp4`
+`dir` is in **the server's** path notation and must sit inside a configured
+Stash library path, or `moveFiles` refuses. It need not exist — `moveFiles`
+creates it.
 
-Available template variables:
+`backup_dir` is on the machine running Custodian, and empty means
+`~/.local/share/custodian/backups`.
 
-| Variable | Example | Source |
+### `sources`
+
+Both are optional and only feed `custodian canon`. Set
+`stash_box_endpoint` when your Stash has more than one stash-box configured
+and you do not want to pass `--endpoint` every time. `fss.db` and
+`fss.json_dir` may both be set; the two are read together.
+
+### Retired keys
+
+`scoring`, `review_policy`, `apply`, `merge`, `orphans` and
+`stash_box_fingerprints` no longer exist. `custodian config validate` names
+each one it finds and what took its place.
+
+## Safety model
+
+1. **Dry run is the default.** Every command that writes anything computes its
+   plan in full and writes nothing without `--commit`. That protection is
+   never removed.
+2. **`--commit` asks for a typed `YES`**, with a summary of what will happen.
+   `--yes` bypasses the prompt for scripted use, but `--commit` is still
+   required separately, so no single typo can start a destructive run.
+3. **A verified database backup precedes every commit.** `apply` and `prune`
+   download Stash's database, verify it is real SQLite rather than a zip of
+   blobs, and refuse to continue if they cannot. A manifest is written beside
+   it.
+4. **Quarantine, not deletion.** `apply` moves a loser's file into a directory
+   inside the library and tags its scene. The scene stays in Stash, visible
+   and rescuable, until `prune` — a separate, deliberate command — removes it
+   30 days later.
+5. **Every write is logged before it is sent.** The mutation log records what,
+   when, from and to, including sidecar and quarantine moves, and is stamped
+   with the outcome afterwards. `custodian log` reads it; `prune` and `undo`
+   depend on it.
+6. **A changes file per commit run.** `<backup-name>.changes.json` records the
+   keeper's pre-union field values, each loser's original path, the sidecars
+   moved, and the tag added.
+7. **`undo` reverses an apply** from that log, and only ever removes what
+   Custodian added. It refuses to move a file back onto a path something else
+   now occupies, and skips restoring any keeper field someone has changed
+   since.
+8. **`prune` is the only irreversible step**, it runs only on what was
+   quarantined and logged, it skips anything that was un-tagged, and its
+   verified backup is its reversal.
+9. **The API key is never logged and never stored in the config file** — only
+   the name of the environment variable is.
+10. **Sidecars are never overwritten.** A subtitle whose destination exists is
+    left in place and reported. Cross-filesystem moves copy to a temporary
+    name first, so an interrupted copy cannot leave a truncated subtitle where
+    Stash would index it.
+
+## Reviewing in Stash
+
+Custodian has no review UI. Review happens in Stash's own interface, through
+tags, because that is where the video player, the metadata and the muscle
+memory already are.
+
+| Tag | On | Means |
 |---|---|---|
-| `{performer}` | `Some Performer` | Primary performer (first alphabetically) |
-| `{studio}` | `Some Studio` | Studio name from Stash |
-| `{title}` | `A Long Scene Title` | Scene title (spaces → `space_char`) |
-| `{date}` | `2024-12-15` | Scene date |
-| `{year}` | `2024` | First 4 chars of date |
-| `{resolution}` | `1080p`, `4k` | Derived from video height |
-| `{ext}` | `mp4` | File extension |
-| `{id}` | `42` | Stash scene ID (guaranteed unique) |
+| `_custodian_quarantine` | every loser `apply` quarantined | its file has moved to the quarantine directory and `prune` will delete it after 30 days |
+| `_custodian_mistag` | every scene in a `mistag` group | neither copy matches the canonical runtime, or one is longer than it. The metadata is wrong, not the file |
 
-Folder parts use `folder_space_char` (default: space), filename parts
-use `space_char` (default: dot). So `Some Performer` becomes the folder
-`Some Performer/` but the filename part `Some.Performer`.
+Both tag names are configurable under `quarantine`.
+
+**To review a quarantine:** filter Stash by `_custodian_quarantine`, play what
+you are unsure of, and remove the tag from anything that should stay. `prune`
+skips any group with an un-tagged loser, so an un-tag is a veto — no further
+action needed. Then run `custodian undo <signature>` to put the file back
+where it was.
+
+**To review mis-tags:** filter by `_custodian_mistag`. These are scenes whose
+`stash_id` points at the wrong stash-box entry. Custodian will not touch them:
+the fix is to correct the `stash_id` in Stash, then re-run `sync` and `scan`.
+
+**To dismiss a group permanently**, run
+`custodian groups dismiss <signature>`. The decision is keyed on the set of
+file hashes rather than scene ids, so it survives a merge or a rescan — scene
+ids do not.
 
 ## Sidecar files (subtitles)
 
-A **sidecar** is a file that shares a video's name:
+A sidecar is a file that shares a video's name:
 
 ```
 clip_1080p.mp4
@@ -429,32 +741,25 @@ clip_1080p.es.srt
 
 ### Why this needs special handling
 
-Stash does **not** index subtitles as files. At scan time it looks next to each
-video for `<stem>.srt` or `<stem>.<lang>.srt` and attaches whatever it finds as
-a *property of the scene*. A caption therefore has no file ID, no row in the
-file table, no identity of its own.
-
-You can see this on any Stash instance — a caption that the UI is actively
-displaying returns nothing from `findFiles`:
+Stash does **not** index subtitles as files. At scan time it looks next to
+each video for `<stem>.srt` or `<stem>.<lang>.srt` and attaches what it finds
+as a *property of the scene*. A caption therefore has no file id, no row in
+the file table, no identity of its own. You can see this on any Stash
+instance — a caption the UI is actively displaying returns nothing from
+`findFiles`:
 
 | `findFiles` query | count |
 |---|---|
 | path includes `.mp4` | 51,494 |
 | path includes `.srt` | **0** |
 
-`moveFiles` — the mutation `organize` uses — takes `ids: [ID!]`. There is
-nothing to pass it for a subtitle. **This is an API limitation, not a design
-choice.** Before this feature existed, `organize` moved a video through
-`moveFiles`, Stash moved only what it had an ID for, and every subtitle stayed
-behind. The caption silently vanished from the scene.
+`moveFiles` takes `ids: [ID!]`. There is nothing to pass it for a subtitle.
+This is an API limitation, not a design choice. So Custodian moves sidecars
+itself — the only part of the tool that touches the filesystem directly, and
+the reason `sidecars.path_map` exists.
 
-So custodian moves sidecars itself. This is the **only** part of the tool
-that touches the filesystem directly, and it is why the config below exists.
-
-### What it does
-
-When `organize` moves or renames a video, its sidecars follow, keeping their
-language suffix:
+When a video moves or is renamed, its sidecars follow, keeping their language
+suffix:
 
 ```
 tmp2/clip_1080p.mp4      →  Some Performer/2024-01-01_Clip_4k.mp4     (via Stash)
@@ -462,28 +767,18 @@ tmp2/clip_1080p.en.srt   →  Some Performer/2024-01-01_Clip_4k.en.srt  (via cus
 tmp2/clip_1080p.es.srt   →  Some Performer/2024-01-01_Clip_4k.es.srt  (via custodian)
 ```
 
-Preserving `.en` / `.es` is what keeps multi-language captions working — a bare
-`<stem>.srt` is filed by Stash as language `00` (unknown), and two unknown-
-language tracks would collide on the same filename.
+Preserving `.en` / `.es` is what keeps multi-language captions working: a bare
+`<stem>.srt` is filed by Stash as language `00` (unknown), and two
+unknown-language tracks would collide on the same filename.
 
-### Configuration
+### `path_map`
 
-```yaml
-sidecars:
-  enabled: true
-  extensions: [srt, ass, ssa, vtt, sub, idx, smi]
-  access: auto          # auto | local | ssh | off
-  path_map:
-    - stash: /data
-      local: /share/main/Videos
-```
+This is the part people get wrong. Stash reports paths as seen from inside its
+own process — usually `/data/...` in a Docker deployment, which often exists
+nowhere else. Map that onto something the machine running Custodian can reach.
+Longest matching prefix wins.
 
-**`path_map` is the part people get wrong.** Stash reports paths as seen from
-inside its own process — usually `/data/...` in a Docker deployment, which
-often exists nowhere else. You must map that onto something the machine running
-custodian can reach. Longest matching prefix wins.
-
-| Where custodian runs | `path_map` |
+| Where Custodian runs | `path_map` |
 |---|---|
 | On the NAS itself | `stash: /data` → `local: /share/main/Videos` |
 | Linux box, share mounted | `stash: /data` → `local: /mnt/nas/Videos` |
@@ -496,10 +791,8 @@ are all understood, and prefix matching is case-insensitive for them.
 
 ### When the library isn't mounted
 
-If custodian runs somewhere with no access to the library — a workstation,
-with the files on a NAS — use the SSH backend. It speaks SFTP rather than
-shelling out to `ssh`, which matters for media filenames containing spaces,
-`+`, `(`, `'` and `&`.
+Use the SSH backend. It speaks SFTP rather than shelling out to `ssh`, which
+matters for media filenames containing spaces, `+`, `(`, `'` and `&`.
 
 ```yaml
 sidecars:
@@ -515,329 +808,82 @@ sidecars:
     accept_new_host_key: false
 ```
 
-Authentication is tried in the order you would expect: explicit key, then
-ssh-agent, then `~/.ssh/id_ed25519` / `id_rsa` / `id_ecdsa`, then password.
-Host keys are verified against `~/.ssh/known_hosts`. `accept_new_host_key`
-trusts an *unknown* host on first contact; a **changed** key on an already-known
-host is always rejected regardless of the setting.
+Authentication order: explicit key, ssh-agent, then `~/.ssh/id_ed25519` /
+`id_rsa` / `id_ecdsa`, then password. Host keys are verified against
+`~/.ssh/known_hosts`. `accept_new_host_key` trusts an *unknown* host on first
+contact; a **changed** key on an already-known host is always rejected.
 
 ### Verify it before relying on it
 
 ```sh
-custodian sidecars check
+custodian doctor
 ```
 
-This resolves real scene paths through your `path_map` and reads them back, so
-a mapping that parses fine but points nowhere fails loudly here rather than
-silently skipping files during an apply.
-
-```
-✓ backend reachable: ssh://me@nas.local:22
-
-Testing 5 path(s):
-  ✓ /data/Some Performer/Clip_con_subtitulos_1080p.mp4
-      sidecar: Clip_con_subtitulos_1080p.en.srt
-      sidecar: Clip_con_subtitulos_1080p.es.srt
-
-readable: 5   failed: 0   sidecars found: 2
-```
-
-Use `--path /data/some/specific.mp4` to probe one file.
-
-### Safety
-
-- **Never overwrites.** If the destination already exists the sidecar is left
-  in place and reported. A clobbered subtitle is unrecoverable; one left behind
-  is not.
-- **The video move still succeeds** if a sidecar fails. Failures are counted
-  and listed rather than aborting the batch.
-- **Dry run shows sidecars too** — `organize apply` without `--commit` reports
-  how many will move, so there are no surprises at commit time.
-- **Cross-filesystem moves** fall back to copy-then-delete, writing to a
-  temporary name first so an interrupted copy cannot leave a truncated subtitle
-  where Stash would pick it up.
-
-After applying, run a Stash scan over the affected folders so the captions are
-re-attached.
-
-## Workflow E: Subs — match loose subtitles to scenes
-
-`organize` keeps subtitles attached going forward. `subs` fixes the ones that
-are *already* adrift: files that were never named after their video, or that got
-left behind before sidecar support existed.
-
-```sh
-# What belongs where? Nothing is moved.
-custodian subs scan --dir /data/webm
-
-# Machine-readable too.
-custodian subs scan --dir /data/webm --json report.json
-
-# Place the confident ones.
-custodian subs apply --dir /data/webm --commit
-```
-
-### Where the subtitles are
-
-`--dir` can point anywhere:
-
-| Folder | What happens |
-|---|---|
-| On this machine (`~/Downloads/Subs`) | read locally, even if the library is remote |
-| Inside the library (`/data/webm`) | translated through `sidecars.path_map` |
-| Elsewhere on the library host | used as-is, and it says so |
-
-There is no flag for this — a directory that exists on this machine is read
-locally, otherwise it is treated as a path on the library backend.
-
-**Subtitles and library can be on different machines.** `subs apply` streams
-each file across and removes the original, so a folder on your desktop can feed
-a library on a NAS in one command. The transfer lands on a temporary name
-first: a half-written subtitle at the real path would be indexed by Stash as a
-valid caption.
-
-### How matching works
-
-Filenames alone are not enough. These are real pairs:
-
-```
-StudioHandleXXX_Mommy-and-Son-Nesting-Season+(transcribed+on+25-Jul-2024).srt
-  → 2023-05-23_Some.Performer-stepMommy.and.stepSon.Nesting.Season_1080p.mp4
-
-thehousenextdoor2024 - The Reluctant Dog Sitter - Compressed.srt
-  → The-Reluctant-Pet-Sitter-Part-1.mp4
-```
-
-Three independent signals are combined:
-
-| Signal | Weight | Notes |
-|---|---|---|
-| Studio / JAV code | +60 | `VENU-765`, `RCTD-590` — near-decisive when present |
-| Exact filename | +100 | The subtitle is already named after the video |
-| Name similarity | +0…70 | Scene **title** and **filename** scored separately, better wins |
-| **Runtime** | +0…45, −30 | The subtitle's last cue vs. the scene duration |
-| Matching date | +25 | `YYYY-MM-DD` in the filename vs. the scene date |
-| Creator agreement | +20 | Narrows the field; never decides on its own |
-
-**Title and filename are compared independently.** Libraries carry the
-identifying information in one place or the other: in a measured 61k-scene
-library 52% of scenes had no title at all and relied entirely on a structured
-filename, while a Stash-Box tagged library is the reverse — good titles beside
-filenames like `1080p.wmv`. Scoring a merged blob served neither. The report
-tells you which won: `title 100%` or `filename 57%`.
-
-**Creator names come from your own library.** Performer and studio names plus
-their aliases are fetched from Stash and squashed into handles, which are split
-out of name similarity so two unrelated clips by one creator do not look alike.
-Nothing is hard-coded, so it stays correct as your library grows.
-
-**Folder names are a hint.** If subtitles are filed under a performer or studio
-folder, that names the creator even when the filename is a bare title. Folders
-contribute creator evidence only, never title evidence — a directory says who,
-not what.
-
-**Runtime is what makes this trustworthy.** Two scenes can share a title, a
-performer and a studio, but not a length. In practice a correct match lands
-within a couple of seconds while a same-titled decoy sits minutes away:
-
-```
-Nurse+River+Soothes+the+Aching+Patient+WM+(transcribed…).srt   10:52
-  → #55739  Nurse River Soothes the Aching Patient   10:54   +2s     ✓
-    #75175  Nurse River Soothes the Aching Patient   33:49   +1377s  ✗
-```
-
-Names were a dead tie; runtime was not.
-
-A subtitle that runs *past* the end of a video counts as evidence against the
-pairing, not for it — though a few seconds of overrun is tolerated, since the
-measurement takes the maximum timestamp, which includes cue *end* times.
-
-### Verdicts
-
-| Verdict | Meaning | `subs apply` |
-|---|---|---|
-| `CONFIRMED` | Name and runtime agree, no rival close | moved |
-| `LIKELY` | Good evidence, weaker on one axis | moved only with `--include-likely` |
-| `AMBIGUOUS` | Several candidates too close to separate | left alone |
-| `UNMATCHED` | Nothing credible in the library | left alone |
-
-The gap to the runner-up matters as much as the absolute score: a high score
-with a near-tie is exactly the case where an automatic choice would be wrong,
-so it is reported as `AMBIGUOUS` for you to settle.
-
-Subtitles that are *already* correctly named next to their video are counted as
-"already attached" and skipped — they need no work.
-
-### Language detection
-
-`subs apply` names each file `<video-stem>.<lang>.srt`, and the language is
-detected from the subtitle's **own text**, not its filename — filenames are
-frequently wrong or silent about it. Script detection handles CJK, Hangul and
-Cyrillic; the Latin-script languages are separated by function-word frequency.
-
-If the language cannot be determined the subtitle is **left alone** rather than
-guessed at, because a wrong caption tag is worse than none.
-
-### What it will not do
-
-- **Stash only reads `srt` and `vtt` captions.** Other formats in
-  `sidecars.extensions` (`ass`, `ssa`, `sub`, `idx`, `smi`) are still moved so
-  they travel with their video, but Stash will not display them. Verified on a
-  live library: 1,019 registered captions, every one `srt`, and a correctly
-  placed `.ass` file ignored.
-- **A subtitle whose language cannot be detected is left alone**, not guessed
-  at — a wrong caption tag is worse than none.
-- It never overwrites an existing file.
-- It never deletes anything. Two subtitles resolving to the same destination —
-  duplicate downloads of one transcript — are resolved by keeping the larger
-  (fuller) one; the other is reported and left where it is.
-- `subs scan` is entirely read-only.
-
-## Safety features
-
-- **Filename-info-loss safety net.** When the scorer picks a higher-quality
-  keeper but a loser has a date-bearing structured filename that the keeper
-  doesn't, the group is flagged `needs_review` instead of auto-decided.
-  This prevents silently losing information encoded only in filenames.
-  The check uses a permissive "contains a YYYY-MM-DD style date" test —
-  not the strict convention regex — so it catches non-standard filename
-  formats too.
-
-- **Rename-on-merge.** Even when the keeper file is the right quality
-  choice, it might have a junk filename. The merge pipeline renames it
-  to use the loser's structured basename (with the resolution token
-  swapped) before deleting the losers. Configurable via
-  `merge.post_merge_file_cleanup.rename_winner_filename` (default: on).
-
-- **Filename-to-metadata extraction.** During merge, if neither keeper nor
-  losers have a title or date set in Stash but a loser file matches the
-  `YYYY-MM-DD_Performer-Title_Resolution.ext` convention, the date and
-  title are parsed from the filename and set on the keeper before merging.
-
-## Interactive review (TUI)
-
-For a faster review experience than the CLI report + mark workflow:
-
-```sh
-custodian review                          # shows decided + needs_review groups
-custodian review --filter all             # shows everything
-custodian review --filter needs-review    # focus on the hard cases
-```
-
-### Full review-to-delete walkthrough
-
-This is the complete end-to-end flow including the TUI:
-
-```sh
-# 1. Scan to find duplicates
-custodian scenes scan
-
-# 2. Check what you have
-custodian scenes status
-#    decided: N       ← scorer picked a winner, ready to merge/tag
-#    needs_review: M  ← scorer couldn't decide, you must pick
-
-# 3. Auto-decided groups can be applied immediately (no review needed)
-custodian scenes apply --action merge         # preview
-custodian scenes apply --action merge --commit # execute
-
-# 4. Review the needs_review groups in the TUI
-custodian review --filter needs-review
-
-# 5. In the TUI: for each group, press 'o', pick the scene to keep,
-#    press Enter. The status bar updates live.
-
-# 6. Quit the TUI (q). It shows next steps.
-
-# 7. Re-scan to convert your decisions into "decided" groups
-custodian scenes scan
-
-# 8. Now merge the newly-decided groups
-custodian scenes apply --action merge --commit
-```
-
-### TUI navigation
-
-**List mode** — browse all groups at a glance:
-- `j`/`k` or `↑`/`↓` to navigate
-- `PgUp`/`PgDn` to jump 10 groups
-- `Enter` to drill into detail
-- `q` to quit (shows next steps if you made changes)
-
-**Detail mode** — one group at a time with full context:
-- Color-coded `KEEP` / `drop` / `?` roles for each scene
-- Resolution, codec, file size, flags (stashID, organized, tags)
-- Per-loser `↳ kept by: <reason>` explanation from the scorer
-- Full file paths
-
-### TUI actions
-
-Actions differ depending on the group's status:
-
-**For `needs_review` groups** (the scorer couldn't auto-decide):
-
-| Key | Action |
-|-----|--------|
-| `o` | **Pick keeper** — arrow-select which scene to keep, Enter to confirm. This is the main action you want. |
-| `n` | Mark as not_duplicate (these scenes aren't actually the same content) |
-| `d` | Dismiss (skip this group forever) |
-| `a` | Shows a warning — you must use `o` first to pick a keeper |
-| `↓` | Skip to next group without deciding |
-| `Esc` | Back to list |
-
-**For `decided` groups** (the scorer already picked a winner):
-
-| Key | Action |
-|-----|--------|
-| `a` | Accept the scorer's pick (confirms it as a permanent override) |
-| `o` | Change the keeper (if you disagree with the scorer's pick) |
-| `n` | Mark as not_duplicate |
-| `d` | Dismiss |
-| `↓` | Next group |
-| `Esc` | Back to list |
-
-### How the TUI connects to apply
-
-The TUI only **saves decisions locally** — it never deletes files or
-touches Stash. The actual deletion happens when you run `apply`:
-
-```
-TUI decisions → saved to custodian.sqlite
-                      ↓
-         custodian scenes scan  (re-reads decisions, marks groups decided)
-                      ↓
-         custodian scenes apply --action merge --commit  (executes)
-```
-
-The **status bar** updates live as you make decisions, so you can see
-progress: `decided:5 review:3 dismissed:2`.
-
-When you **quit**, the TUI prints:
-```
-Saved 10 decisions. Next steps:
-  1. custodian scenes scan
-  2. custodian scenes status
-  3. custodian scenes apply --action merge --commit
-```
-
-## Tips
-
-- **Run `custodian stats` first** to see your library size, metadata coverage,
-  and the state of each workflow's local cache.
-- **Start with `--action tag`** until you trust the scoring. Tags are
-  reversible; merge/delete are not.
-- **Use `--distance 4`** (default). Distance 8 catches more but produces
-  false positives. Distance 0 is ultra-safe but misses re-encodes.
-- **Pipe reports through `less -S`** to avoid line wrapping on narrow
-  terminals.
-- **The `--json` flag** on every report/status command makes it easy to
-  pipe into `jq` or a script. On `subs scan`, each candidate also carries the
-  scene's stem, date, studio and performers, and each match carries the
-  subtitle's stem and folder path — enough to replay the matcher's decisions
-  elsewhere (subtitlematch's regression corpus does exactly this).
-- **Re-scan after changes.** If you delete scenes in Stash's UI, the
-  local cache becomes stale. `custodian stats` will warn; just re-scan.
-- **`custodian.sqlite` is portable.** Copy it to another machine to browse
-  reports offline.
-- **`custodian scenes mark --group N`** is faster than copying signatures. Use
-  the `#N` from the report output directly.
+This resolves real library paths through your `path_map` and reads them back,
+so a mapping that parses fine but points nowhere fails loudly here rather than
+silently skipping files during an apply. Use `--path /data/some/file.mp4` to
+probe one specific path.
+
+After a run that moved subtitles, run a Stash scan over the affected folders
+so the captions are re-attached.
+
+## Known Stash behaviours
+
+Verified against Stash v0.31.1 (schema 85). Each one cost a bug to discover;
+none of them are guesses.
+
+- `sceneMerge` does **not** union scene-level metadata. The caller passes
+  `values`, which is why `apply` computes the union itself.
+- Stash attaches a re-scanned file to an existing scene by **oshash/md5
+  only**, never phash — so the several files inside one scene are always
+  byte-equivalent. That is the `multifile` signal.
+- Cross-scene identical-hash groups cannot persist: Stash folds them into one
+  scene at scan time. Only the within-scene case exists.
+- `findDuplicateScenes` is unpaginated. It has to be stream-decoded.
+- `deleteFiles` removes the file from **disk**. `destroyFiles` removes only
+  the database row, and the next scan re-adds the file. The names suggest the
+  opposite of what they do.
+- Subtitles have no file id, so `moveFiles` cannot move them. Filesystem
+  access is the only route.
+- `moveFiles` creates the destination directory itself. The quarantine
+  directory need not pre-exist — it only has to lie inside a library path.
+- `backup(download: true, includeBlobs: true)` returns a **zip** when blobs are
+  stored on disk, which is the normal configuration. Only a raw-SQLite
+  download can be verified, which is what the backup gate insists on.
+- The `resolution` string on a file lies: 720-wide is not 720p, and 4K is
+  reported as "Full HD". Use width and height.
+- `SceneFilter.UpdatedAfter` works and is what makes incremental sync
+  possible, but it is not mirrored into saved-filter criteria.
+
+## Troubleshooting
+
+**`custodian doctor` says the library cannot be opened.** `sidecars.access` is
+`auto`, which picks `ssh` when `sidecars.ssh.host` is set and `local`
+otherwise. If the library is a mount that is not currently mounted, `local`
+will fail on every path.
+
+**`doctor` resolves paths but finds no sidecars.** That is a correct result if
+there are none. `--path` a video you know has a subtitle beside it to be sure.
+
+**`apply` refuses to start: no verified backup.** Stash returned a zip rather
+than raw SQLite, which happens when blobs are stored on disk. That is the
+gate working — a zip cannot be verified, and an unverified backup is not a
+backup.
+
+**`moveFiles` refuses the quarantine directory.** `quarantine.dir` must sit
+inside a path Stash has configured as a library, in the server's own notation.
+`/data/_quarantine` when the library is `/data`.
+
+**`scan` reports far fewer groups than you expect.** Check
+`without stash_id` in `custodian status`. The `stash_id` signal cannot see a
+scene that has no stash-box entry, and on a typical library that is half of
+it. `phash` and `filename` cover some of the rest.
+
+**A group you disagree with keeps coming back.** `custodian groups dismiss
+<signature>`. Decisions are keyed on the set of file oshashes, so a dismissal
+survives a rescan.
+
+**Everything is `conflicted`.** The default duration tolerance is
+`min(2%, 120s)`. Two copies of the same scene from different sources often
+differ by more. `custodian canon` plus `custodian rejudge` is the principled
+answer; `--tolerance-pct 10` is the blunt one.

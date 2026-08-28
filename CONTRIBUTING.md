@@ -19,10 +19,10 @@ The tag's annotation is rendered as a callout above the commit list — use it
 for what the commits cannot say on their own:
 
 ```bash
-git tag -a v0.4.1 -m "fixes the merge preview dropping stash_ids
+git tag -a v0.4.1 -m "fixes the union preview dropping stash_ids
 
-Re-run `custodian scan` after upgrading; cached listings from v0.4.0 are
-still valid."
+Re-run `custodian scan` after upgrading; groups found by v0.4.0 are still
+valid."
 ```
 
 ### What the release produces
@@ -68,10 +68,13 @@ Instead, every push runs the `Stash integration` job in
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It boots a throwaway
 `stashapp/stash` container, generates a small library with ffmpeg, scans and
 phashes it, creates a performer and a studio, and runs
-`go test -count=1 ./internal/stash/...` against the result with
+`go test -count=1 ./internal/mirror/... ./internal/evidence/...
+./internal/reclaim/... ./internal/subs/...` against the result with
 `SFX_INT_STASH_SEEDED=1` — which makes those tests **assert** the fixtures
-rather than skip. A regression in the Stash client fails the commit that
-introduced it, not a release three weeks later.
+rather than skip. `internal/reclaim`'s share of that actually moves and
+deletes files in the fixture library, so the job mounts it writable and the
+test additionally requires `SFX_INT_STASH_WRITABLE=1`. A regression fails the
+commit that introduced it, not a release three weeks later.
 
 So the release checklist is short: the tag is on a commit whose CI is green.
 
@@ -92,11 +95,20 @@ fails there.
 
 ```sh
 SFX_INT_STASH_URL=http://your-stash:9999 \
-  go test -count=1 ./internal/stash/... -run Integration -v
+  go test -count=1 ./internal/mirror/... ./internal/evidence/... \
+    ./internal/subs/... -run Integration -v
 ```
 
-Read-only — the suite queries and never writes. Unset `SFX_INT_STASH_URL`
-skips all nine `TestIntegration*` functions.
+Those three are read-only: they query and never write. `internal/reclaim`'s
+suite is not, which is why it is not in the line above — it moves files into
+the quarantine directory and deletes them, and it refuses to run without
+`SFX_INT_STASH_WRITABLE=1` on top of the URL, so pointing a bare
+`SFX_INT_STASH_URL` at a real library can never trigger it. It also reads
+`SFX_INT_STASH_LIBRARY_DIR`, the host path it stats to confirm a quarantined
+file is physically gone rather than only gone from Stash's bookkeeping.
+
+Unset `SFX_INT_STASH_URL` and every `TestIntegration*` function skips, so
+`go test ./...` stays hermetic.
 
 `SFX_INT_STASH_SEEDED=1` is a second, separate switch, and it changes what a
 missing fixture means:
@@ -106,9 +118,14 @@ missing fixture means:
 | Nothing found | skipped | skipped | **failed** |
 
 Set it only when the library really is the harness fixture set — three scenes,
-one of them holding two files, one phash-duplicate pair at distance 0, one
-performer and one studio. Pointed at your own library it will report things
-that are not wrong with it. CI sets it; you generally should not.
+one of them holding two byte-identical files, one phash-duplicate pair at
+distance 0 sharing a fabricated stash_id, one performer and one studio.
+Pointed at your own library it will report things that are not wrong with it.
+CI sets it; you generally should not.
+
+`internal/reclaim`'s suite consumes those fixtures: it deletes files. Against
+a local container, regenerate the fixture library between runs — CI gets a
+fresh container each time and does not have to.
 
 It exists because a suite that skips when it finds nothing passes just as
 happily against an *empty* Stash, which is a CI job that cannot go red. The

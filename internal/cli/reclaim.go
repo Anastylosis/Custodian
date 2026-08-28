@@ -47,7 +47,7 @@ mutations that would be sent — and nothing is written anywhere.`,
 	cmd.Flags().IntVar(&flagApplyLimit, "limit", 0, "limit the number of groups acted on (0 = no limit)")
 	cmd.Flags().StringVar(&flagApplyQuarantine, "quarantine-dir", "", "where losers' files go, in the server's path notation")
 	cmd.Flags().StringVar(&flagApplyBackupDir, "backup-dir", "", "where the verified database backup is written")
-	cmd.Flags().StringVar(&flagApplyLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagApplyLedger, "ledger", "", ledgerFlagUsage)
 	return cmd
 }
 
@@ -161,7 +161,7 @@ left alone. Dry run by default.`,
 	cmd.Flags().BoolVar(&flagPruneYes, "yes", false, "skip the interactive YES prompt (still needs --commit)")
 	cmd.Flags().IntVar(&flagPruneLimit, "limit", 0, "limit the number of groups acted on (0 = no limit)")
 	cmd.Flags().StringVar(&flagPruneBackupDir, "backup-dir", "", "where the verified database backup is written")
-	cmd.Flags().StringVar(&flagPruneLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagPruneLedger, "ledger", "", ledgerFlagUsage)
 	return cmd
 }
 
@@ -235,7 +235,7 @@ attempting. A dry run writes nothing here.`,
 		RunE: runLog,
 	}
 	cmd.Flags().IntVar(&flagLogLimit, "limit", 50, "how many entries to print (0 = all)")
-	cmd.Flags().StringVar(&flagLogLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagLogLedger, "ledger", "", ledgerFlagUsage)
 	return cmd
 }
 

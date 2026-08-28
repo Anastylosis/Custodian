@@ -18,11 +18,11 @@ var (
 func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show the ledger's current view of the library",
+		Short: "Show where the library stands",
 		Long:  `The headline numbers for where the library stands: what the last sync saw.`,
 		RunE:  runStatus,
 	}
-	cmd.Flags().StringVar(&flagStatusLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagStatusLedger, "ledger", "", ledgerFlagUsage)
 	cmd.Flags().BoolVar(&flagStatusJSON, "json", false, "emit the stats as JSON")
 	return cmd
 }

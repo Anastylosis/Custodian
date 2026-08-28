@@ -3,8 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/Anastylosis/Custodian/internal/config"
@@ -13,6 +11,10 @@ import (
 	stash "github.com/Anastylosis/stash-go"
 	"github.com/spf13/cobra"
 )
+
+// ledgerFlagUsage is one string so every command's --help says the same
+// thing about where the ledger lives.
+const ledgerFlagUsage = "path to the ledger sqlite file (default: ./custodian.ledger.sqlite, else ~/.local/share/custodian/)"
 
 var (
 	flagSyncFull    bool
@@ -23,7 +25,7 @@ var (
 func newSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Mirror Stash's scene library into the local ledger",
+		Short: "Mirror Stash's scenes and files into the local ledger",
 		Long: `Pages Stash's scenes and files into the ledger, incrementally by default:
 only scenes updated since the last sync are fetched.
 
@@ -34,7 +36,7 @@ after any bulk deletion in Stash, so what quietly vanished gets tombstoned.`,
 	}
 	cmd.Flags().BoolVar(&flagSyncFull, "full", false, "resync the whole library and tombstone what's gone")
 	cmd.Flags().IntVar(&flagSyncPerPage, "per-page", 500, "scenes fetched per page")
-	cmd.Flags().StringVar(&flagSyncLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagSyncLedger, "ledger", "", ledgerFlagUsage)
 	return cmd
 }
 
@@ -80,11 +82,6 @@ func loadLedgerAndClient(ledgerOverride string) (*config.Config, *ledger.Ledger,
 	if cfgPath == "" {
 		cfgPath = config.DefaultConfigPath()
 	}
-	dbPath := flagDBPath
-	if dbPath == "" {
-		dbPath = config.DefaultDBPath()
-	}
-
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -92,7 +89,7 @@ func loadLedgerAndClient(ledgerOverride string) (*config.Config, *ledger.Ledger,
 
 	ledgerPath := ledgerOverride
 	if ledgerPath == "" {
-		ledgerPath = defaultLedgerPath(dbPath)
+		ledgerPath = config.DefaultLedgerPath()
 	}
 	if err := config.EnsureDir(ledgerPath); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("creating ledger directory: %w", err)
@@ -106,12 +103,4 @@ func loadLedgerAndClient(ledgerOverride string) (*config.Config, *ledger.Ledger,
 
 	client := stash.NewClient(cfg.Stash.URL, stash.WithAPIKey(cfg.StashAPIKey()))
 	return cfg, l, client, cleanup, nil
-}
-
-// defaultLedgerPath derives the ledger's path from the store db path so the
-// two SQLite files sit side by side without a separate config knob:
-// /data/custodian.sqlite -> /data/custodian.ledger.sqlite.
-func defaultLedgerPath(dbPath string) string {
-	ext := filepath.Ext(dbPath)
-	return strings.TrimSuffix(dbPath, ext) + ".ledger.sqlite"
 }

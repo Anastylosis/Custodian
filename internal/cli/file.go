@@ -21,7 +21,7 @@ var (
 func newFileCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "file",
-		Short: "Move and rename scenes' files to match the organize template",
+		Short: "Move and rename files to match the organize template",
 		Long: `Computes an ideal path for every live scene in the ledger from a
 configurable template and Stash metadata (performer, studio, title, date,
 resolution), and reports what would move. Video moves go through Stash's
@@ -39,7 +39,7 @@ Dry-run default, --commit required, interactive YES prompt on commit.`,
 	cmd.Flags().BoolVar(&flagFileCommit, "commit", false, "actually move files (default is dry-run)")
 	cmd.Flags().BoolVar(&flagFileYes, "yes", false, "bypass the interactive YES prompt")
 	cmd.Flags().IntVar(&flagFileLimit, "limit", 0, "limit how many scenes are considered (0 = no limit)")
-	cmd.Flags().StringVar(&flagFileLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagFileLedger, "ledger", "", ledgerFlagUsage)
 	return cmd
 }
 
@@ -63,7 +63,7 @@ func runFile(cmd *cobra.Command, _ []string) error {
 
 	mover, moverCleanup, err := sidecar.Build(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("%w\n\nRun `custodian sidecars check` to diagnose, or set sidecars.enabled: false", err)
+		return fmt.Errorf("%w\n\nRun `custodian doctor` to diagnose, or set sidecars.enabled: false", err)
 	}
 	defer moverCleanup()
 

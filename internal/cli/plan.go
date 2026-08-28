@@ -44,7 +44,7 @@ file. "apply" (later) is what acts on this plan.`,
 	cmd.Flags().StringVar(&flagPlanVerdict, "verdict", ledger.VerdictCertain, "verdict to plan: certain, conflicted, dismissed, partial")
 	cmd.Flags().BoolVar(&flagPlanJSON, "json", false, "emit the planned groups as JSON")
 	cmd.Flags().IntVar(&flagPlanLimit, "limit", 0, "limit the number of groups planned (0 = no limit)")
-	cmd.Flags().StringVar(&flagPlanLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagPlanLedger, "ledger", "", ledgerFlagUsage)
 	return cmd
 }
 

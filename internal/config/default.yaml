@@ -6,7 +6,7 @@
 # Every key below is the default value. Delete a line to revert to its
 # default. Add or change only what you need.
 #
-# Full documentation: https://github.com/Anastylosis/Custodian/blob/main/MANUAL.md
+# Full documentation: https://github.com/Anastylosis/Custodian/blob/master/MANUAL.md
 
 stash:
   url: http://localhost:9999
@@ -17,6 +17,10 @@ stash:
   api_key_env: STASH_API_KEY
 
 scan:
+  # Used by the `phash` signal generator, which asks Stash's own
+  # findDuplicateScenes. The stash_id signal — the one that finds almost all
+  # of the duplicates — needs no tuning.
+  #
   # phash hamming distance threshold passed to findDuplicateScenes.
   #   0 = identical perceptual hashes only
   #   4 = catches re-encodes / resolution changes (recommended)
@@ -27,150 +31,6 @@ scan:
   # Two scenes are only grouped as duplicates if their durations are within
   # this many seconds of each other. Strong false-positive filter.
   duration_diff_seconds: 1.0
-
-scoring:
-  # === Workflow A: cross-scene scoring (rules apply to whole scenes) ===
-  #
-  # Lexicographic — first non-tied rule wins. If all rules tie, the group
-  # is marked needs_review and skipped during apply. Reorder or remove
-  # rules to change what "best scene" means for your library.
-  #
-  # Available scene rules:
-  #   has_stash_id     — bool; true wins (scene has stash-box metadata)
-  #   organized        — bool; true wins (scene is marked organized in Stash)
-  #   resolution       — int (width * height); higher wins
-  #   bitrate          — int; higher wins
-  #   codec_preference — ranked by codec_priority list below
-  #   file_size        — int; larger file wins (tiebreaker)
-  #   tag_count        — int; more tags wins
-  #   path_priority    — ranked by path_priority list below
-  scenes:
-    rules:
-      - has_stash_id
-      - organized
-      - resolution
-      - bitrate
-      - codec_preference
-      - file_size
-      - tag_count
-      - path_priority
-
-  # === Workflow B: within-scene file scoring ===
-  #
-  # Only filename/path/mod_time matter here — tech specs are guaranteed
-  # identical because Stash attaches multi-files by oshash/md5 only.
-  #
-  # Available file rules:
-  #   filename_quality — 1 if basename matches the regex below, 0 otherwise
-  #   path_priority    — ranked by path_priority list below
-  #   mod_time         — newer file wins (tiebreaker)
-  files:
-    rules:
-      - filename_quality
-      - path_priority
-      - mod_time
-    filename_quality:
-      # Default matches: YYYY-MM-DD_<anything>_<resolution>[_N].<ext>
-      # The pattern intentionally does NOT try to parse the structure — it
-      # just matches the shape. Filenames where performers are omitted (e.g.
-      # `2023-10-24_-Group.Title_1080p.mp4`) still match because `.+` is
-      # permissive.
-      #
-      # Resolution alternation covers numeric tokens (480/540/720/1080/1440/
-      # 2160/2880/4320) and the "Nk/NK" shorthand for 2K/4K/6K/8K.
-      #
-      # The optional `(_\d+)?` trailing the resolution handles duplicate-
-      # import suffixes Stash adds (e.g. `_1080p_1.mp4`, `_4k_2.mp4`) so
-      # the safety net doesn't false-positive on them.
-      #
-      # Tweak per library if needed.
-      pattern: '^\d{4}[-._]\d{2}[-._]\d{2}_.+_(480|540|720|1080|1440|2160|2880|4320|[2468][kK])p?(_\d+)?\.[A-Za-z0-9]+$'
-
-  # Earlier in the list = more preferred. Used by the codec_preference rule.
-  codec_priority:
-    - av1
-    - hevc
-    - h264
-    - vp9
-
-  # Earlier in the list = more preferred. A scene/file whose path starts
-  # with one of these prefixes scores above one whose path doesn't match.
-  path_priority:
-    - /sorted
-    - /library
-    - /inbox
-
-review_policy:
-  # When a duplicate group has both a metadata-rich scene and a higher-
-  # quality scene that disagree, mark it needs_review and DO NOT auto-decide.
-  flag_metadata_quality_conflict: true
-
-apply:
-  scenes:
-    # Default action for `custodian scenes apply`. Always overridable
-    # with --action flag at runtime.
-    #
-    # Available actions:
-    #   tag     — add _dedupe_loser / _dedupe_keeper tags to scenes.
-    #             No deletion. Review in Stash UI and bulk-delete. (safest)
-    #   merge   — compute metadata union, call sceneMerge, pick best file,
-    #             rename if needed, delete loser files from disk.
-    #             Preserves all metadata. (recommended for reclaiming space)
-    #   delete  — hard-delete loser scenes via scenesDestroy. No metadata
-    #             preservation. Use only when losers have nothing to keep.
-    default_action: tag
-
-    # Tag names used by --action tag. Stash creates them if they don't exist.
-    loser_tag: _dedupe_loser
-    keeper_tag: _dedupe_keeper
-
-  files:
-    # Default action for `custodian files apply`.
-    #
-    # Available actions:
-    #   report  — print proposed primary swaps + deletions (no mutations)
-    #   commit  — actually swap primary file and delete losers from disk
-    #             (requires --commit flag at runtime)
-    default_action: report
-
-stash_box_fingerprints:
-  # When --submit-fingerprints is passed AND --commit is in effect, submit
-  # the keeper scene's fingerprints to all matching stash-box endpoints
-  # after a successful action. Off by default. (Phase 1.5.)
-  enabled: false
-
-orphans:
-  # === Scan tuning ===
-  # These are also settable via CLI flags (which override config values).
-
-  # How many scene IDs to bundle into one scrapeMultiScenes call.
-  # Larger = fewer HTTP calls but heavier per call on stash-box.
-  batch_size: 20
-
-  # Sleep between batches. Controls how aggressively we hit stash-box.
-  # Stash itself also rate-limits per max_requests_per_minute, so this
-  # is a soft limit on our side.
-  #   100ms  = aggressive (~10 batches/sec)
-  #   250ms  = moderate (default, ~4 batches/sec)
-  #   500ms  = gentle
-  #   1s     = very conservative
-  batch_delay: 250ms
-
-  # === Apply behavior ===
-  # By default, custodian orphans is purely a DISCOVERY tool: scan finds
-  # matches, report shows them, and YOU handle the actual linking in
-  # Stash's UI (Scene Tagger). No mutations are made to Stash.
-  #
-  # Set write_stash_id_on_apply to true if you want `custodian orphans apply
-  # --commit` to write the stash_id link onto scenes automatically.
-  # Stash-box can have wrong phash matches, so review the report first.
-  write_stash_id_on_apply: false
-
-  # When write_stash_id_on_apply is true AND this is also true, also
-  # write the scraped title and date onto the scene (only when the
-  # scene's current value is empty). Performer and studio linking
-  # always requires Stash's Scene Tagger regardless.
-  write_metadata_on_apply: false
 
 organize:
   # Base directory that Stash sees (the root of your library).
@@ -248,7 +108,7 @@ organize:
 # So custodian moves them itself. This is the ONLY part of the tool that
 # touches the filesystem, and it needs to actually reach the library.
 #
-# Verify your setup with:  custodian sidecars check
+# Verify your setup with:  custodian doctor
 sidecars:
   enabled: true
 
@@ -307,56 +167,6 @@ sidecars:
     # accept-new). A CHANGED key on an already-known host is always
     # rejected, whatever this is set to.
     accept_new_host_key: false
-
-merge:
-  # Policy for computing the metadata union before calling sceneMerge.
-  # Stash's sceneMerge does NOT auto-union scene-level metadata in v0.31.0
-  # (verified by reading pkg/scene/merge.go) — our tool computes it.
-  #
-  # Allowed values per field:
-  #   union                       — combine all values from keeper + losers
-  #   prefer_keeper_then_loser    — keep keeper's value; if empty, take loser's
-  #   max                         — take the largest numeric value
-  #   any_true                    — boolean OR
-  scene_level:
-    tags:        union
-    performers:  union
-    urls:        union
-    stash_ids:   union
-    galleries:   union
-    groups:      union
-    title:       prefer_keeper_then_loser
-    details:     prefer_keeper_then_loser
-    director:    prefer_keeper_then_loser
-    code:        prefer_keeper_then_loser
-    studio_id:   prefer_keeper_then_loser
-    date:        prefer_keeper_then_loser
-    rating100:   max
-    organized:   any_true
-
-  history:
-    play_history: true   # combine watch dates into the keeper
-    o_history: true      # combine o dates into the keeper
-
-  post_merge_file_cleanup:
-    # After sceneMerge, the keeper scene has multiple files attached. Run
-    # workflow B logic on it: pick the best file as primary, deleteFiles
-    # for the others. Strongly recommended — this is what actually reclaims
-    # disk space.
-    enabled: true
-
-    # Before deleting loser files, if the WINNER file has a junk basename
-    # but at least one loser has a structured one (matches the filename
-    # quality regex), rename the winner via moveFiles to use the loser's
-    # basename — with the resolution token swapped to match the winner's
-    # actual height. This preserves the human-readable info encoded in
-    # the loser's filename without losing the higher-quality file.
-    #
-    # Example:
-    #   winner: /data/tmp3/random_garbage_4k_encoded.mp4 (3840x2160)
-    #   loser:  /data/sorted/2024-12-15_Performer-Title_1080p.mp4
-    #   →  winner becomes /data/tmp3/2024-12-15_Performer-Title_4k.mp4
-    rename_winner_filename: true
 
 # === Reversible apply (REBUILD.md §4.4) ===
 #

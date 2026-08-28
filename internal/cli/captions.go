@@ -11,9 +11,9 @@ import (
 	"github.com/Anastylosis/Custodian/internal/ledger"
 	"github.com/Anastylosis/Custodian/internal/pathmap"
 	"github.com/Anastylosis/Custodian/internal/sidecar"
-	stash "github.com/Anastylosis/Custodian/internal/stash"
 	"github.com/Anastylosis/Custodian/internal/subs"
 	"github.com/Anastylosis/Custodian/internal/vfs"
+	stash "github.com/Anastylosis/stash-go"
 	"github.com/spf13/cobra"
 )
 
@@ -37,15 +37,14 @@ var (
 func newCaptionsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "captions",
-		Short: "Match loose subtitle files to scenes in the ledger",
-		Long: `Point this at a folder of subtitles and it works out which scene each
-one belongs to, the same way "subs" does — studio/code, title similarity
-and runtime, combined — except the scene list comes from the ledger
-instead of paging Stash directly.
+		Short: "Match loose subtitle files to scenes and move them into place",
+		Long: `Point this at a folder of loose subtitles and it works out which scene each
+one belongs to: studio and code, title similarity, and runtime, combined.
+The scene list comes from the ledger, so it costs nothing to re-run.
 
-Nothing is moved by "scan". Use "captions apply --commit" to place the
-matches, which moves each subtitle next to its video and stamps the
-language it detected from the file's own text.`,
+"captions scan" moves nothing. "captions apply --commit" places the matches,
+moving each subtitle next to its video and stamping the language it detected
+from the file's own text.`,
 	}
 
 	scanCmd := &cobra.Command{
@@ -57,7 +56,7 @@ language it detected from the file's own text.`,
 	scanCmd.Flags().BoolVar(&flagCaptionsRecursive, "recursive", true, "descend into subdirectories")
 	scanCmd.Flags().StringVar(&flagCaptionsJSON, "json", "", "also write the full result to this file")
 	scanCmd.Flags().IntVar(&flagCaptionsCandidates, "candidates", 3, "how many candidates to show per subtitle")
-	scanCmd.Flags().StringVar(&flagCaptionsLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	scanCmd.Flags().StringVar(&flagCaptionsLedger, "ledger", "", ledgerFlagUsage)
 	_ = scanCmd.MarkFlagRequired("dir")
 
 	applyCmd := &cobra.Command{
@@ -78,7 +77,7 @@ Stash scan over the affected folders so the captions are picked up.`,
 	applyCmd.Flags().BoolVar(&flagCaptionsIncludeLikely, "include-likely", false, "also move LIKELY matches, not just CONFIRMED")
 	applyCmd.Flags().BoolVar(&flagCaptionsCommit, "commit", false, "actually move files (default is dry-run)")
 	applyCmd.Flags().BoolVar(&flagCaptionsYes, "yes", false, "bypass the interactive YES prompt")
-	applyCmd.Flags().StringVar(&flagCaptionsLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	applyCmd.Flags().StringVar(&flagCaptionsLedger, "ledger", "", ledgerFlagUsage)
 	_ = applyCmd.MarkFlagRequired("dir")
 
 	cmd.AddCommand(scanCmd, applyCmd)
@@ -103,16 +102,12 @@ func captionsSetup(ctx context.Context, cmd *cobra.Command, cfg *config.Config, 
 	out := cmd.OutOrStdout()
 	cleanup = func() {}
 
-	rules := make([]pathmap.Rule, 0, len(cfg.Sidecars.PathMap))
-	for _, r := range cfg.Sidecars.PathMap {
-		rules = append(rules, pathmap.Rule{StashPrefix: r.Stash, LocalPrefix: r.Local})
-	}
-	mp, err := pathmap.New(rules)
+	mp, err := pathMapper(cfg)
 	if err != nil {
 		return nil, cleanup, fmt.Errorf("sidecars.path_map: %w", err)
 	}
 
-	libFS, cleanup, err := openSubsFS(ctx, cfg)
+	libFS, cleanup, err := openLibraryFS(ctx, cfg)
 	if err != nil {
 		return nil, func() {}, err
 	}
@@ -135,7 +130,7 @@ func captionsSetup(ctx context.Context, cmd *cobra.Command, cfg *config.Config, 
 	}
 
 	fmt.Fprintln(out, "fetching performer and studio names…")
-	names, err := stash.NewClient(cfg.Stash.URL, cfg.StashAPIKey()).CreatorNames(ctx)
+	names, err := subs.CreatorNames(ctx, stash.NewClient(cfg.Stash.URL, stash.WithAPIKey(cfg.StashAPIKey())))
 	if err != nil {
 		cleanup()
 		return nil, func() {}, err

@@ -84,8 +84,8 @@ func TestInitPathsUseTheResolvedRoots(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 
-	if got, want := DefaultDBInitPath(), filepath.Join(home, "data", "custodian", "custodian.sqlite"); got != want {
-		t.Errorf("DefaultDBInitPath() = %q, want %q", got, want)
+	if got, want := DefaultLedgerPath(), filepath.Join(home, "data", "custodian", LedgerName); got != want {
+		t.Errorf("DefaultLedgerPath() = %q, want %q", got, want)
 	}
 	// Config init follows os.UserConfigDir, which honours XDG_CONFIG_HOME on
 	// freedesktop platforms and uses the platform-native root elsewhere.
@@ -101,7 +101,7 @@ func TestInitPathsUseTheResolvedRoots(t *testing.T) {
 func TestLocalFilesTakePrecedence(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	for _, name := range []string{"config.yaml", "custodian.sqlite"} {
+	for _, name := range []string{"config.yaml", LedgerName} {
 		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
 			t.Fatalf("writing %s: %v", name, err)
 		}
@@ -109,52 +109,26 @@ func TestLocalFilesTakePrecedence(t *testing.T) {
 	if got := DefaultConfigPath(); got != "config.yaml" {
 		t.Errorf("DefaultConfigPath() = %q, want config.yaml", got)
 	}
-	if got := DefaultDBPath(); got != "custodian.sqlite" {
-		t.Errorf("DefaultDBPath() = %q, want custodian.sqlite", got)
+	if got := DefaultLedgerPath(); got != LedgerName {
+		t.Errorf("DefaultLedgerPath() = %q, want %s", got, LedgerName)
 	}
 }
 
-// A database written by an older build — which put it under the config root
-// when XDG_CONFIG_HOME was set — must still be found. Starting an empty one
-// beside it would strand scan history that cannot be reproduced.
-func TestDefaultDBPathAdoptsAMisplacedLegacyDatabase(t *testing.T) {
+// With nothing in the working directory, the ledger belongs under the data
+// root — never beside the config, which is where an older build put it when
+// XDG_CONFIG_HOME was set.
+func TestDefaultLedgerPathFallsBackToTheDataRoot(t *testing.T) {
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		t.Skip("the roots coincide here, so there is no legacy location")
+		t.Skip("the roots coincide here, so there is nothing to keep apart")
 	}
 	home := t.TempDir()
-	t.Chdir(t.TempDir()) // no ./custodian.sqlite in sight
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_DATA_HOME", "")
-
-	cfgRoot := filepath.Join(home, "cfg")
-	t.Setenv("XDG_CONFIG_HOME", cfgRoot)
-
-	legacy := filepath.Join(cfgRoot, "custodian", "custodian.sqlite")
-	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(legacy, []byte("db"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := DefaultDBPath(); got != legacy {
-		t.Errorf("DefaultDBPath() = %q, want the legacy file at %q", got, legacy)
-	}
-}
-
-// With nothing on disk anywhere, a fresh install must not be lured into the
-// legacy path — new databases belong under the data root.
-func TestDefaultDBInitPathIgnoresLegacyLocation(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		t.Skip("the roots coincide here")
-	}
-	home := t.TempDir()
+	t.Chdir(t.TempDir()) // no ./custodian.ledger.sqlite in sight
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "cfg"))
 
-	want := filepath.Join(home, ".local", "share", "custodian", "custodian.sqlite")
-	if got := DefaultDBInitPath(); got != want {
-		t.Errorf("DefaultDBInitPath() = %q, want %q", got, want)
+	want := filepath.Join(home, ".local", "share", "custodian", LedgerName)
+	if got := DefaultLedgerPath(); got != want {
+		t.Errorf("DefaultLedgerPath() = %q, want %q", got, want)
 	}
 }

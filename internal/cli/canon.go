@@ -23,7 +23,7 @@ var (
 func newCanonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "canon",
-		Short: "Fetch canonical durations for conflicted scenes from stash-box or FSS",
+		Short: "Fetch canonical runtimes from a stash-box or an FSS catalogue",
 		Long: `Finds scenes belonging to a live group with the given verdict (conflicted by
 default) that carry no canonical duration yet, asks the configured source(s)
 about them, and stores whatever each source found.
@@ -38,7 +38,7 @@ verdicts; canon itself only fetches and stores.`,
 	cmd.Flags().StringVar(&flagCanonFSSJSON, "fss-json", "", "directory of FSS's *.json exports (default: sources.fss.json_dir)")
 	cmd.Flags().StringVar(&flagCanonVerdict, "verdict", "conflicted", "verdict whose scenes need a canonical")
 	cmd.Flags().IntVar(&flagCanonLimit, "limit", 0, "limit the number of scenes looked up (0 = no limit)")
-	cmd.Flags().StringVar(&flagCanonLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagCanonLedger, "ledger", "", ledgerFlagUsage)
 	return cmd
 }
 

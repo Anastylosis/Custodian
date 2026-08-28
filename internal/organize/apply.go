@@ -256,7 +256,8 @@ func PrintReport(w io.Writer, r *ScanResult) error {
 	}
 	if r.MultiFileWarning > 0 {
 		fmt.Fprintf(w, "\n⚠ %d scenes have multiple files — only the primary file is moved.\n", r.MultiFileWarning)
-		fmt.Fprintf(w, "  Run `custodian files apply --commit` first to clean up multi-file scenes.\n")
+		fmt.Fprintf(w, "  `custodian scan` reports them as multifile groups; plan and apply\n")
+		fmt.Fprintf(w, "  them first so each scene holds one file.\n")
 	}
 	return nil
 }

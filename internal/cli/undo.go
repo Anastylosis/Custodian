@@ -44,7 +44,7 @@ backup is the only way back. Dry run by default.`,
 	cmd.Flags().Int64Var(&flagUndoRun, "run", 0, "undo every group quarantined by this apply run, instead of naming a signature")
 	cmd.Flags().StringVar(&flagUndoBackupDir, "backup-dir", "",
 		"accepted for symmetry with apply/prune; undo takes no backup of its own — it only reverses already-logged, already-backed-up writes")
-	cmd.Flags().StringVar(&flagUndoLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
+	cmd.Flags().StringVar(&flagUndoLedger, "ledger", "", ledgerFlagUsage)
 	return cmd
 }
 
