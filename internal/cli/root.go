@@ -61,6 +61,8 @@ See PLAN.md for the full design.`,
 	root.AddCommand(newSubsCmd())
 	root.AddCommand(newStatsCmd())
 	root.AddCommand(newReviewCmd())
+	root.AddCommand(newSyncCmd())
+	root.AddCommand(newStatusCmd())
 
 	return root
 }
