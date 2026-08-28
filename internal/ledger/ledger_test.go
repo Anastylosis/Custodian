@@ -496,9 +496,10 @@ func TestAppendMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginRun: %v", err)
 	}
-	if err := l.AppendMutation(ctx, Mutation{
+	id, err := l.AppendMutation(ctx, Mutation{
 		RunID: runID, At: "2024-01-01", Kind: "move", Target: "f1", From: "/a", To: "/b",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("AppendMutation: %v", err)
 	}
 
@@ -508,6 +509,29 @@ func TestAppendMutation(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("mutation_log rows = %d, want 1", count)
+	}
+
+	// The row lands before the write is sent, so it starts unstamped.
+	entries, err := l.Mutations(ctx, 0)
+	if err != nil {
+		t.Fatalf("Mutations: %v", err)
+	}
+	if len(entries) != 1 || entries[0].OK != nil {
+		t.Fatalf("Mutations() = %+v, want one entry with OK nil", entries)
+	}
+
+	if err := l.MarkMutation(ctx, id, true, "done"); err != nil {
+		t.Fatalf("MarkMutation: %v", err)
+	}
+	entries, err = l.Mutations(ctx, 0)
+	if err != nil {
+		t.Fatalf("Mutations: %v", err)
+	}
+	if entries[0].OK == nil || !*entries[0].OK {
+		t.Errorf("OK = %v, want true", entries[0].OK)
+	}
+	if entries[0].Note != "done" {
+		t.Errorf("Note = %q, want %q", entries[0].Note, "done")
 	}
 }
 
@@ -545,8 +569,14 @@ func TestErrorsAreWrappedWhenTheLedgerIsClosed(t *testing.T) {
 	if _, _, err := l.GetDecision(ctx, "x"); err == nil {
 		t.Error("GetDecision on a closed ledger should fail")
 	}
-	if err := l.AppendMutation(ctx, Mutation{}); err == nil {
+	if _, err := l.AppendMutation(ctx, Mutation{}); err == nil {
 		t.Error("AppendMutation on a closed ledger should fail")
+	}
+	if err := l.MarkMutation(ctx, 1, true, ""); err == nil {
+		t.Error("MarkMutation on a closed ledger should fail")
+	}
+	if _, err := l.Mutations(ctx, 0); err == nil {
+		t.Error("Mutations on a closed ledger should fail")
 	}
 }
 

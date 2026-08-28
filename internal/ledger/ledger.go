@@ -17,7 +17,7 @@ import (
 var schemaSQL string
 
 // currentSchemaVersion is the schema version this build knows how to apply.
-const currentSchemaVersion = 3
+const currentSchemaVersion = 4
 
 // Ledger wraps a database/sql connection to the ledger's SQLite file.
 type Ledger struct {
@@ -70,6 +70,15 @@ func (l *Ledger) applySchema(ctx context.Context) error {
 
 	if current < 3 {
 		if err := l.addColumnIfMissing(ctx, "candidate_group", "keeper", "TEXT"); err != nil {
+			return err
+		}
+	}
+
+	if current < 4 {
+		if err := l.addColumnIfMissing(ctx, "candidate_group", "applied_run", "INTEGER"); err != nil {
+			return err
+		}
+		if err := l.addColumnIfMissing(ctx, "mutation_log", "ok", "INTEGER"); err != nil {
 			return err
 		}
 	}

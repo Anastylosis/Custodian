@@ -20,6 +20,8 @@ func TestFormatStatsNeverSynced(t *testing.T) {
 		"bytes on disk:     0 B\n" +
 		"duplicate groups:  0 (certain 0, conflicted 0, dismissed 0)\n" +
 		"reclaimable:       0 B\n" +
+		"quarantined:       0 groups (0 B)\n" +
+		"reclaimed:         0 groups (0 B)\n" +
 		"last sync:         never — run `custodian sync`\n" +
 		"last scan:         never — run `custodian scan`\n"
 	if got != want {
@@ -33,9 +35,11 @@ func TestFormatStatsWithLastRun(t *testing.T) {
 		ScenesWithMultipleFiles: 59, ScenesWithStashID: 28946, ScenesWithoutStashID: 32272,
 		BytesLive: 1 << 40, FilesWithoutPhash: 1400,
 		GroupsCertain: 843, GroupsConflicted: 410, GroupsDismissed: 2,
-		ReclaimableBytes: 1<<40 + 1<<39, // 1.5 TiB
-		LastSync:         &ledger.Run{StartedAt: "2026-08-28T00:00:00Z", Kind: "incremental", ScenesSeen: 42},
-		LastScan:         &ledger.Run{StartedAt: "2026-08-28T00:01:00Z", Notes: "certain 843, conflicted 410, dismissed 2"},
+		ReclaimableBytes:  1<<40 + 1<<39, // 1.5 TiB
+		GroupsQuarantined: 12, QuarantinedBytes: 2 << 30,
+		GroupsReclaimed: 3, ReclaimedBytes: 4 << 30,
+		LastSync: &ledger.Run{StartedAt: "2026-08-28T00:00:00Z", Kind: "incremental", ScenesSeen: 42},
+		LastScan: &ledger.Run{StartedAt: "2026-08-28T00:01:00Z", Notes: "certain 843, conflicted 410, dismissed 2"},
 	}
 	got := formatStats(stats)
 	for _, want := range []string{
@@ -48,6 +52,8 @@ func TestFormatStatsWithLastRun(t *testing.T) {
 		"bytes on disk:     1.00 TiB",
 		"duplicate groups:  1255 (certain 843, conflicted 410, dismissed 2)",
 		"reclaimable:       1.50 TiB",
+		"quarantined:       12 groups (2.00 GiB)",
+		"reclaimed:         3 groups (4.00 GiB)",
 		"last sync:         2026-08-28T00:00:00Z (incremental), 42 changed",
 		"last scan:         2026-08-28T00:01:00Z, certain 843, conflicted 410, dismissed 2",
 	} {

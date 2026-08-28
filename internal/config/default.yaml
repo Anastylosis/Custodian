@@ -357,3 +357,22 @@ merge:
     #   loser:  /data/sorted/2024-12-15_Performer-Title_1080p.mp4
     #   →  winner becomes /data/tmp3/2024-12-15_Performer-Title_4k.mp4
     rename_winner_filename: true
+
+# === Reversible apply (REBUILD.md §4.4) ===
+#
+# `custodian apply` never deletes. It unions each duplicate group's metadata
+# onto the keeper, tags every loser, and moves the loser's file into the
+# quarantine directory — inside the library root, so Stash keeps tracking it
+# and it can be reviewed or rescued from Stash's own UI. `custodian prune`
+# merges and deletes what is still tagged 30 days later.
+quarantine:
+  # In the server's path notation, and it must be inside a configured Stash
+  # library path or moveFiles will refuse.
+  dir: /data/_quarantine
+
+  # Put on every loser scene. Search for it in Stash to review quarantine.
+  tag: _custodian_quarantine
+
+  # Where the verified database backup goes before any --commit run. Empty
+  # means ~/.local/share/custodian/backups.
+  backup_dir: ""

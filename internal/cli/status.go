@@ -64,6 +64,10 @@ func formatStats(stats ledger.Stats) string {
 		stats.GroupsCertain+stats.GroupsConflicted+stats.GroupsDismissed,
 		stats.GroupsCertain, stats.GroupsConflicted, stats.GroupsDismissed)
 	s += fmt.Sprintf("reclaimable:       %s\n", confirm.HumanBytes(stats.ReclaimableBytes))
+	s += fmt.Sprintf("quarantined:       %d groups (%s)\n",
+		stats.GroupsQuarantined, confirm.HumanBytes(stats.QuarantinedBytes))
+	s += fmt.Sprintf("reclaimed:         %d groups (%s)\n",
+		stats.GroupsReclaimed, confirm.HumanBytes(stats.ReclaimedBytes))
 	if stats.LastSync != nil {
 		s += fmt.Sprintf("last sync:         %s (%s), %d changed\n",
 			stats.LastSync.StartedAt, stats.LastSync.Kind, stats.LastSync.ScenesSeen)

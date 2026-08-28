@@ -5,14 +5,25 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
-// Verdict values a policy can reach. Only these three exist in phase 2;
-// partial/mistag/probable/rejected arrive with later generators.
+// Verdict values a policy can reach. partial/mistag/probable/rejected arrive
+// with later generators.
 const (
 	VerdictCertain    = "certain"
 	VerdictConflicted = "conflicted"
 	VerdictDismissed  = "dismissed"
+
+	// VerdictQuarantined is where `apply` leaves a group: the losers are
+	// tagged and their files sit in the quarantine directory, still in
+	// Stash and still on disk. Nothing has been deleted, so "applied"
+	// would name something that did not happen.
+	VerdictQuarantined = "quarantined"
+
+	// VerdictReclaimed is where `prune` leaves a group: the losers were
+	// merged into the keeper and their files deleted from disk.
+	VerdictReclaimed = "reclaimed"
 )
 
 // Evidence is one fact a generator found supporting or informing a
@@ -36,6 +47,11 @@ type Group struct {
 	Reclaimable int64
 	Keeper      string
 	Steps       []Step
+
+	// AppliedRun is the run that quarantined or reclaimed the group, and
+	// AppliedAt when that run started. Both are zero until `apply` acts.
+	AppliedRun int64
+	AppliedAt  string
 }
 
 // Step is one rule internal/keeper evaluated while choosing a group's
@@ -50,6 +66,11 @@ type Step struct {
 type GroupFilter struct {
 	Verdict     string
 	IncludeGone bool
+
+	// AppliedBefore keeps only groups whose applying run started before
+	// this instant — how `prune` finds quarantines old enough to reclaim.
+	// The zero time means "no age filter".
+	AppliedBefore time.Time
 }
 
 // ReplaceGroups upserts groups seen this run and marks gone_run on any
@@ -158,16 +179,24 @@ func (s *groupStatements) upsertGroup(ctx context.Context, runID int64, g Group)
 // Groups returns candidate groups matching filter, each with its scenes and
 // evidence populated.
 func (l *Ledger) Groups(ctx context.Context, filter GroupFilter) ([]Group, error) {
-	query := `SELECT signature, verdict, reason, reclaimable, keeper FROM candidate_group WHERE 1=1`
+	query := `SELECT g.signature, g.verdict, g.reason, g.reclaimable, g.keeper,
+	                 g.applied_run, r.started_at
+	          FROM candidate_group g
+	          LEFT JOIN run r ON r.id = g.applied_run
+	          WHERE 1=1`
 	var args []any
 	if !filter.IncludeGone {
-		query += ` AND gone_run IS NULL`
+		query += ` AND g.gone_run IS NULL`
 	}
 	if filter.Verdict != "" {
-		query += ` AND verdict = ?`
+		query += ` AND g.verdict = ?`
 		args = append(args, filter.Verdict)
 	}
-	query += ` ORDER BY signature`
+	if !filter.AppliedBefore.IsZero() {
+		query += ` AND g.applied_run IS NOT NULL AND r.started_at < ?`
+		args = append(args, filter.AppliedBefore.UTC().Format(time.RFC3339))
+	}
+	query += ` ORDER BY g.signature`
 
 	rows, err := l.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -176,12 +205,16 @@ func (l *Ledger) Groups(ctx context.Context, filter GroupFilter) ([]Group, error
 	var groups []Group
 	for rows.Next() {
 		var g Group
-		var keeper sql.NullString
-		if err := rows.Scan(&g.Signature, &g.Verdict, &g.Reason, &g.Reclaimable, &keeper); err != nil {
+		var keeper, appliedAt sql.NullString
+		var appliedRun sql.NullInt64
+		if err := rows.Scan(&g.Signature, &g.Verdict, &g.Reason, &g.Reclaimable, &keeper,
+			&appliedRun, &appliedAt); err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("ledger: scanning candidate_group row: %w", err)
 		}
 		g.Keeper = keeper.String
+		g.AppliedRun = appliedRun.Int64
+		g.AppliedAt = appliedAt.String
 		groups = append(groups, g)
 	}
 	if err := rows.Err(); err != nil {
@@ -310,6 +343,18 @@ func (l *Ledger) SetChoice(ctx context.Context, signature, keeper string, losers
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("ledger: committing SetChoice: %w", err)
+	}
+	return nil
+}
+
+// SetOutcome records what an apply or prune run did to a group: its new
+// verdict, and the run that did it.
+func (l *Ledger) SetOutcome(ctx context.Context, signature, verdict string, runID int64) error {
+	_, err := l.db.ExecContext(ctx,
+		`UPDATE candidate_group SET verdict = ?, applied_run = ? WHERE signature = ?`,
+		verdict, nullIfZero(runID), signature)
+	if err != nil {
+		return fmt.Errorf("ledger: setting outcome %s for %s: %w", verdict, signature, err)
 	}
 	return nil
 }

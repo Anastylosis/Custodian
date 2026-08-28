@@ -19,7 +19,11 @@ type Stats struct {
 	GroupsCertain           int
 	GroupsConflicted        int
 	GroupsDismissed         int
+	GroupsQuarantined       int
+	GroupsReclaimed         int
 	ReclaimableBytes        int64
+	QuarantinedBytes        int64
+	ReclaimedBytes          int64
 	LastSync                *Run // most recent full/incremental run
 	LastScan                *Run // most recent scan run
 }
@@ -106,12 +110,22 @@ func (l *Ledger) statsGroups(ctx context.Context, st *Stats) error {
 		switch verdict {
 		case VerdictCertain:
 			st.GroupsCertain = count
+			st.ReclaimableBytes += reclaimable
 		case VerdictConflicted:
 			st.GroupsConflicted = count
+			st.ReclaimableBytes += reclaimable
 		case VerdictDismissed:
 			st.GroupsDismissed = count
+			st.ReclaimableBytes += reclaimable
+		case VerdictQuarantined:
+			// Not counted as reclaimable: the bytes are still on disk, but
+			// they are spoken for — `prune` is what frees them.
+			st.GroupsQuarantined = count
+			st.QuarantinedBytes = reclaimable
+		case VerdictReclaimed:
+			st.GroupsReclaimed = count
+			st.ReclaimedBytes = reclaimable
 		}
-		st.ReclaimableBytes += reclaimable
 	}
 	return rows.Err()
 }

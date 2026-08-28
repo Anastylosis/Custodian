@@ -41,6 +41,20 @@ type Config struct {
 	Sidecars             SidecarsConfig       `yaml:"sidecars"`
 	StashBoxFingerprints StashBoxFingerprints `yaml:"stash_box_fingerprints"`
 	Merge                Merge                `yaml:"merge"`
+	Quarantine           Quarantine           `yaml:"quarantine"`
+}
+
+// Quarantine configures the reversible apply path (REBUILD.md §4.4): where
+// losers' files are parked, what tag marks them, and where the verified
+// database backup that must precede any write is kept.
+type Quarantine struct {
+	// Dir is in the server's path notation and must sit inside a Stash
+	// library path, or moveFiles refuses to move anything there.
+	Dir string `yaml:"dir"`
+	Tag string `yaml:"tag"`
+	// BackupDir is on the machine running custodian. Empty means
+	// ~/.local/share/custodian/backups.
+	BackupDir string `yaml:"backup_dir"`
 }
 
 // SidecarsConfig controls whether companion files (subtitles, and anything

@@ -119,7 +119,9 @@ CREATE TABLE IF NOT EXISTS decision (
   notes      TEXT NOT NULL DEFAULT ''
 );
 
--- Every write Custodian made: what, when, from and to.
+-- Every write Custodian made: what, when, from and to. A row is inserted
+-- BEFORE the write is sent, with ok NULL, and stamped 1 or 0 once the server
+-- answers — so a crash mid-way leaves a record of the attempt.
 CREATE TABLE IF NOT EXISTS mutation_log (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id     INTEGER,
@@ -128,7 +130,8 @@ CREATE TABLE IF NOT EXISTS mutation_log (
   target     TEXT NOT NULL,
   from_value TEXT NOT NULL DEFAULT '',
   to_value   TEXT NOT NULL DEFAULT '',
-  note       TEXT NOT NULL DEFAULT ''
+  note       TEXT NOT NULL DEFAULT '',
+  ok         INTEGER
 );
 
 -- Duplicate-candidate groups, replaced wholesale by each `scan` run. Keyed
@@ -141,6 +144,7 @@ CREATE TABLE IF NOT EXISTS candidate_group (
   reason      TEXT NOT NULL DEFAULT '',
   reclaimable INTEGER NOT NULL DEFAULT 0,
   keeper      TEXT,
+  applied_run INTEGER,
   seen_run    INTEGER NOT NULL,
   gone_run    INTEGER
 );
