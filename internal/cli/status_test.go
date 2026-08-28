@@ -20,7 +20,8 @@ func TestFormatStatsNeverSynced(t *testing.T) {
 		"bytes on disk:     0 B\n" +
 		"duplicate groups:  0 (certain 0, conflicted 0, dismissed 0)\n" +
 		"reclaimable:       0 B\n" +
-		"last sync:         never — run `custodian sync`\n"
+		"last sync:         never — run `custodian sync`\n" +
+		"last scan:         never — run `custodian scan`\n"
 	if got != want {
 		t.Errorf("formatStats(zero) =\n%q\nwant\n%q", got, want)
 	}
@@ -33,7 +34,8 @@ func TestFormatStatsWithLastRun(t *testing.T) {
 		BytesLive: 1 << 40, FilesWithoutPhash: 1400,
 		GroupsCertain: 843, GroupsConflicted: 410, GroupsDismissed: 2,
 		ReclaimableBytes: 1<<40 + 1<<39, // 1.5 TiB
-		LastRun:          &ledger.Run{StartedAt: "2026-08-28T00:00:00Z", Kind: "incremental", ScenesSeen: 42},
+		LastSync:         &ledger.Run{StartedAt: "2026-08-28T00:00:00Z", Kind: "incremental", ScenesSeen: 42},
+		LastScan:         &ledger.Run{StartedAt: "2026-08-28T00:01:00Z", Notes: "certain 843, conflicted 410, dismissed 2"},
 	}
 	got := formatStats(stats)
 	for _, want := range []string{
@@ -47,6 +49,7 @@ func TestFormatStatsWithLastRun(t *testing.T) {
 		"duplicate groups:  1255 (certain 843, conflicted 410, dismissed 2)",
 		"reclaimable:       1.50 TiB",
 		"last sync:         2026-08-28T00:00:00Z (incremental), 42 changed",
+		"last scan:         2026-08-28T00:01:00Z, certain 843, conflicted 410, dismissed 2",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("formatStats output missing %q, got:\n%s", want, got)

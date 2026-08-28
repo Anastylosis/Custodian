@@ -64,11 +64,16 @@ func formatStats(stats ledger.Stats) string {
 		stats.GroupsCertain+stats.GroupsConflicted+stats.GroupsDismissed,
 		stats.GroupsCertain, stats.GroupsConflicted, stats.GroupsDismissed)
 	s += fmt.Sprintf("reclaimable:       %s\n", confirm.HumanBytes(stats.ReclaimableBytes))
-	if stats.LastRun != nil {
+	if stats.LastSync != nil {
 		s += fmt.Sprintf("last sync:         %s (%s), %d changed\n",
-			stats.LastRun.StartedAt, stats.LastRun.Kind, stats.LastRun.ScenesSeen)
+			stats.LastSync.StartedAt, stats.LastSync.Kind, stats.LastSync.ScenesSeen)
 	} else {
 		s += "last sync:         never — run `custodian sync`\n"
+	}
+	if stats.LastScan != nil {
+		s += fmt.Sprintf("last scan:         %s, %s\n", stats.LastScan.StartedAt, stats.LastScan.Notes)
+	} else {
+		s += "last scan:         never — run `custodian scan`\n"
 	}
 	return s
 }

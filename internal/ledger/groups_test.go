@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"testing"
 
 	stash "github.com/Anastylosis/stash-go"
@@ -354,6 +355,227 @@ func TestPrimaryFilesEmptyInput(t *testing.T) {
 	}
 	if len(files) != 0 {
 		t.Errorf("PrimaryFiles(nil) = %v, want empty", files)
+	}
+}
+
+func TestSetChoiceRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "full", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.UpsertScenes(ctx, runID, twoScenes()); err != nil {
+		t.Fatalf("UpsertScenes: %v", err)
+	}
+
+	scanRun, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun (scan): %v", err)
+	}
+	group := Group{Signature: "hash1+hash2", SceneIDs: []string{"1", "2"}, Verdict: VerdictCertain, Reason: "durations agree"}
+	if err := l.ReplaceGroups(ctx, scanRun, []Group{group}); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	steps := []Step{
+		{Rule: "tier", Detail: "1080p vs 720p", Outcome: "1 wins"},
+	}
+	if err := l.SetChoice(ctx, "hash1+hash2", "1", []string{"2"}, steps); err != nil {
+		t.Fatalf("SetChoice: %v", err)
+	}
+
+	got, err := l.Groups(ctx, GroupFilter{})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Groups = %d, want 1", len(got))
+	}
+	g := got[0]
+	if g.Keeper != "1" {
+		t.Errorf("Keeper = %q, want 1", g.Keeper)
+	}
+	// twoScenes: scene 1's primary file (f1) is 100 bytes, scene 2's (f3) is
+	// 50 — the loser's size is what SetChoice recomputes reclaimable from.
+	if g.Reclaimable != 50 {
+		t.Errorf("Reclaimable = %d, want 50 (loser scene 2's primary file size)", g.Reclaimable)
+	}
+	if !reflect.DeepEqual(g.Steps, steps) {
+		t.Errorf("Steps = %+v, want %+v", g.Steps, steps)
+	}
+
+	stats, err := l.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if stats.ReclaimableBytes != 50 {
+		t.Errorf("Stats.ReclaimableBytes = %d, want 50 (SetChoice's recompute reflected in status)", stats.ReclaimableBytes)
+	}
+}
+
+func TestSetChoiceReplacesStepsWholesale(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	if err := l.SetChoice(ctx, "hash1+hash2", "1", []string{"2"},
+		[]Step{{Rule: "tier", Outcome: "tie"}, {Rule: "bitrate", Outcome: "1 wins"}}); err != nil {
+		t.Fatalf("SetChoice (first): %v", err)
+	}
+	if err := l.SetChoice(ctx, "hash1+hash2", "2", []string{"1"},
+		[]Step{{Rule: "size", Outcome: "2 wins"}}); err != nil {
+		t.Fatalf("SetChoice (second): %v", err)
+	}
+
+	got, err := l.Groups(ctx, GroupFilter{})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	g := got[0]
+	if g.Keeper != "2" {
+		t.Errorf("Keeper = %q, want 2 (second SetChoice wins)", g.Keeper)
+	}
+	want := []Step{{Rule: "size", Outcome: "2 wins"}}
+	if !reflect.DeepEqual(g.Steps, want) {
+		t.Errorf("Steps = %+v, want %+v (old steps fully replaced, not accumulated)", g.Steps, want)
+	}
+}
+
+func TestGroupsReturnsStepsInOrder(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	steps := []Step{
+		{Rule: "tier", Detail: "1080p vs 1080p", Outcome: "tie"},
+		{Rule: "bitrate", Detail: "14.5 vs 14.4 Mbps", Outcome: "tie under 10%"},
+		{Rule: "codec", Detail: "hevc vs h264", Outcome: "1 wins"},
+	}
+	if err := l.SetChoice(ctx, "hash1+hash2", "1", []string{"2"}, steps); err != nil {
+		t.Fatalf("SetChoice: %v", err)
+	}
+
+	got, err := l.Groups(ctx, GroupFilter{})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	if !reflect.DeepEqual(got[0].Steps, steps) {
+		t.Errorf("Steps = %+v, want %+v in the same order", got[0].Steps, steps)
+	}
+}
+
+func TestGroupsKeeperEmptyBeforePlanRuns(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	got, err := l.Groups(ctx, GroupFilter{})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	for _, g := range got {
+		if g.Keeper != "" {
+			t.Errorf("group %s Keeper = %q, want empty before plan runs", g.Signature, g.Keeper)
+		}
+		if len(g.Steps) != 0 {
+			t.Errorf("group %s Steps = %v, want none before plan runs", g.Signature, g.Steps)
+		}
+	}
+}
+
+func TestReplaceGroupsFailsWhenCandidateSceneTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_scene`); err != nil {
+		t.Fatalf("dropping candidate_scene: %v", err)
+	}
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()); err == nil {
+		t.Error("ReplaceGroups should fail when candidate_scene is missing")
+	}
+}
+
+func TestReplaceGroupsFailsWhenCandidateEvidenceTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_evidence`); err != nil {
+		t.Fatalf("dropping candidate_evidence: %v", err)
+	}
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()); err == nil {
+		t.Error("ReplaceGroups should fail when candidate_evidence is missing")
+	}
+}
+
+func TestSetChoiceFailsWhenCandidateGroupTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_step`); err != nil {
+		t.Fatalf("dropping candidate_step: %v", err)
+	}
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_group`); err != nil {
+		t.Fatalf("dropping candidate_group: %v", err)
+	}
+	if err := l.SetChoice(ctx, "sig", "1", nil, nil); err == nil {
+		t.Error("SetChoice should fail when candidate_group is missing")
+	}
+}
+
+func TestSetChoiceFailsWhenCandidateStepTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_step`); err != nil {
+		t.Fatalf("dropping candidate_step: %v", err)
+	}
+	if err := l.SetChoice(ctx, "hash1+hash2", "1", []string{"2"}, nil); err == nil {
+		t.Error("SetChoice should fail when candidate_step is missing")
+	}
+}
+
+func TestSumPrimaryFileSizesFailsWhenFileTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE file`); err != nil {
+		t.Fatalf("dropping file: %v", err)
+	}
+	if err := l.SetChoice(ctx, "sig", "1", []string{"2"}, nil); err == nil {
+		t.Error("SetChoice should fail when file is missing (sumPrimaryFileSizes)")
 	}
 }
 

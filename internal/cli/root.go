@@ -65,6 +65,7 @@ See PLAN.md for the full design.`,
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newScanCmd())
 	root.AddCommand(newGroupsCmd())
+	root.AddCommand(newPlanCmd())
 
 	return root
 }

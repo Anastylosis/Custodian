@@ -20,7 +20,8 @@ type Stats struct {
 	GroupsConflicted        int
 	GroupsDismissed         int
 	ReclaimableBytes        int64
-	LastRun                 *Run
+	LastSync                *Run // most recent full/incremental run
+	LastScan                *Run // most recent scan run
 }
 
 // Stats computes the current library summary from the ledger.
@@ -69,11 +70,17 @@ func (l *Ledger) Stats(ctx context.Context) (Stats, error) {
 		return Stats{}, err
 	}
 
-	lastRun, err := l.LastRun(ctx)
+	lastSync, err := l.LastRunOfKind(ctx, "full", "incremental")
 	if err != nil {
 		return Stats{}, err
 	}
-	st.LastRun = lastRun
+	st.LastSync = lastSync
+
+	lastScan, err := l.LastRunOfKind(ctx, "scan")
+	if err != nil {
+		return Stats{}, err
+	}
+	st.LastScan = lastScan
 
 	return st, nil
 }

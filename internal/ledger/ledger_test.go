@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -316,8 +317,66 @@ func TestStats(t *testing.T) {
 	if stats.FilesWithoutPhash != 2 {
 		t.Errorf("FilesWithoutPhash = %d, want 2", stats.FilesWithoutPhash)
 	}
-	if stats.LastRun == nil || stats.LastRun.ID != run1 {
-		t.Errorf("LastRun = %v, want run %d", stats.LastRun, run1)
+	if stats.LastSync == nil || stats.LastSync.ID != run1 {
+		t.Errorf("LastSync = %v, want run %d", stats.LastSync, run1)
+	}
+	if stats.LastScan != nil {
+		t.Errorf("LastScan = %v, want nil (no scan run yet)", stats.LastScan)
+	}
+}
+
+func TestStatsLastScanIgnoresSyncRuns(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	syncRun, err := l.BeginRun(ctx, "incremental", "2026-01-01")
+	if err != nil {
+		t.Fatalf("BeginRun (incremental): %v", err)
+	}
+	if err := l.FinishRun(ctx, syncRun, RunSummary{ScenesSeen: 1}); err != nil {
+		t.Fatalf("FinishRun (incremental): %v", err)
+	}
+	scanRun, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun (scan): %v", err)
+	}
+	if err := l.FinishRun(ctx, scanRun, RunSummary{Notes: "certain 1, conflicted 0, dismissed 0"}); err != nil {
+		t.Fatalf("FinishRun (scan): %v", err)
+	}
+
+	stats, err := l.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if stats.LastSync == nil || stats.LastSync.ID != syncRun {
+		t.Errorf("LastSync = %v, want run %d (the sync, not the later scan)", stats.LastSync, syncRun)
+	}
+	if stats.LastScan == nil || stats.LastScan.ID != scanRun {
+		t.Errorf("LastScan = %v, want run %d", stats.LastScan, scanRun)
+	}
+}
+
+func TestLastRunOfKindNoKinds(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	r, err := l.LastRunOfKind(ctx)
+	if err != nil {
+		t.Fatalf("LastRunOfKind(): %v", err)
+	}
+	if r != nil {
+		t.Errorf("LastRunOfKind() = %v, want nil", r)
+	}
+}
+
+func TestLastRunOfKindNoneYet(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	r, err := l.LastRunOfKind(ctx, "full", "incremental")
+	if err != nil {
+		t.Fatalf("LastRunOfKind: %v", err)
+	}
+	if r != nil {
+		t.Errorf("LastRunOfKind = %v, want nil (nothing has run)", r)
 	}
 }
 
@@ -615,5 +674,222 @@ func TestStatsFailsWhenStashIDTableIsMissing(t *testing.T) {
 	}
 	if _, err := l.Stats(ctx); err == nil {
 		t.Error("Stats should fail when scene_stash_id is missing")
+	}
+}
+
+// schemaV2SQL is phase 2's schema.sql, frozen here so
+// TestOpenMigratesAnExistingV2Ledger can build a database in the shape a
+// pre-keeper ledger would actually be in — candidate_group with no keeper
+// column, no candidate_step table — then verify Open migrates it forward.
+const schemaV2SQL = `
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS schema_version (
+  version INTEGER PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS scene (
+  id          TEXT PRIMARY KEY,
+  title       TEXT NOT NULL DEFAULT '',
+  code        TEXT NOT NULL DEFAULT '',
+  date        TEXT NOT NULL DEFAULT '',
+  studio_id   TEXT NOT NULL DEFAULT '',
+  studio_name TEXT NOT NULL DEFAULT '',
+  organized   INTEGER NOT NULL DEFAULT 0,
+  rating100   INTEGER,
+  play_count  INTEGER NOT NULL DEFAULT 0,
+  updated_at  TEXT NOT NULL DEFAULT '',
+  seen_run    INTEGER NOT NULL,
+  gone_run    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS file (
+  id          TEXT PRIMARY KEY,
+  scene_id    TEXT NOT NULL REFERENCES scene(id) ON DELETE CASCADE,
+  path        TEXT NOT NULL DEFAULT '',
+  basename    TEXT NOT NULL DEFAULT '',
+  size        INTEGER NOT NULL DEFAULT 0,
+  mod_time    TEXT NOT NULL DEFAULT '',
+  width       INTEGER NOT NULL DEFAULT 0,
+  height      INTEGER NOT NULL DEFAULT 0,
+  duration    REAL NOT NULL DEFAULT 0,
+  video_codec TEXT NOT NULL DEFAULT '',
+  audio_codec TEXT NOT NULL DEFAULT '',
+  frame_rate  REAL NOT NULL DEFAULT 0,
+  bit_rate    INTEGER NOT NULL DEFAULT 0,
+  is_primary  INTEGER NOT NULL DEFAULT 0,
+  oshash      TEXT,
+  md5         TEXT,
+  phash       TEXT,
+  seen_run    INTEGER NOT NULL,
+  gone_run    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS run (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at    TEXT NOT NULL,
+  finished_at   TEXT,
+  kind          TEXT NOT NULL,
+  since         TEXT,
+  scenes_seen   INTEGER NOT NULL DEFAULT 0,
+  files_seen    INTEGER NOT NULL DEFAULT 0,
+  scenes_gone   INTEGER NOT NULL DEFAULT 0,
+  stash_version TEXT NOT NULL DEFAULT '',
+  notes         TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS decision (
+  key        TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  keeper     TEXT,
+  decided_at TEXT NOT NULL,
+  notes      TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS mutation_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id     INTEGER,
+  at         TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  target     TEXT NOT NULL,
+  from_value TEXT NOT NULL DEFAULT '',
+  to_value   TEXT NOT NULL DEFAULT '',
+  note       TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS candidate_group (
+  signature   TEXT PRIMARY KEY,
+  verdict     TEXT NOT NULL,
+  reason      TEXT NOT NULL DEFAULT '',
+  reclaimable INTEGER NOT NULL DEFAULT 0,
+  seen_run    INTEGER NOT NULL,
+  gone_run    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS candidate_scene (
+  signature TEXT NOT NULL REFERENCES candidate_group(signature) ON DELETE CASCADE,
+  scene_id  TEXT NOT NULL,
+  PRIMARY KEY(signature, scene_id)
+);
+
+CREATE TABLE IF NOT EXISTS candidate_evidence (
+  signature TEXT NOT NULL REFERENCES candidate_group(signature) ON DELETE CASCADE,
+  generator TEXT NOT NULL,
+  kind      TEXT NOT NULL,
+  detail    TEXT NOT NULL DEFAULT '',
+  value     REAL
+);
+
+INSERT INTO schema_version(version) VALUES(2);
+INSERT INTO candidate_group(signature, verdict, reason, reclaimable, seen_run, gone_run)
+  VALUES('hash1+hash2', 'certain', 'durations agree', 100, 1, NULL);
+`
+
+func TestAddColumnIfMissingFailsWhenTableIsGone(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_group`); err != nil {
+		t.Fatalf("dropping candidate_group: %v", err)
+	}
+	if err := l.addColumnIfMissing(ctx, "candidate_group", "keeper", "TEXT"); err == nil {
+		t.Error("addColumnIfMissing should fail when the table doesn't exist")
+	}
+}
+
+func TestAddColumnIfMissingNoopsWhenColumnAlreadyThere(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	// candidate_group.keeper already exists on a fresh ledger.
+	if err := l.addColumnIfMissing(ctx, "candidate_group", "keeper", "TEXT"); err != nil {
+		t.Errorf("addColumnIfMissing should no-op when the column exists: %v", err)
+	}
+}
+
+func TestStatsFailsWhenRunTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE run`); err != nil {
+		t.Fatalf("dropping run: %v", err)
+	}
+	if _, err := l.Stats(ctx); err == nil {
+		t.Error("Stats should fail when run is missing")
+	}
+}
+
+func TestOpenMigratesAnExistingV2Ledger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v2.ledger.sqlite")
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("opening raw sqlite: %v", err)
+	}
+	if _, err := raw.Exec(schemaV2SQL); err != nil {
+		t.Fatalf("applying v2 schema: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("closing raw sqlite: %v", err)
+	}
+
+	l, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open (migrating v2): %v", err)
+	}
+	defer func() { _ = l.Close() }()
+
+	var hasKeeper bool
+	rows, err := l.DB().Query(`PRAGMA table_info(candidate_group)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info: %v", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("scanning table_info: %v", err)
+		}
+		if name == "keeper" {
+			hasKeeper = true
+		}
+	}
+	_ = rows.Close()
+	if !hasKeeper {
+		t.Fatal("candidate_group.keeper column missing after migration")
+	}
+
+	var stepTableExists int
+	if err := l.DB().QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='candidate_step'`).
+		Scan(&stepTableExists); err != nil {
+		t.Fatalf("checking candidate_step: %v", err)
+	}
+	if stepTableExists != 1 {
+		t.Fatal("candidate_step table missing after migration")
+	}
+
+	// The pre-existing group survived the migration untouched.
+	var verdict string
+	if err := l.DB().QueryRow(`SELECT verdict FROM candidate_group WHERE signature = 'hash1+hash2'`).
+		Scan(&verdict); err != nil {
+		t.Fatalf("reading migrated group: %v", err)
+	}
+	if verdict != "certain" {
+		t.Errorf("verdict = %q, want certain", verdict)
+	}
+
+	// SetChoice works against the migrated schema.
+	ctx := context.Background()
+	if err := l.SetChoice(ctx, "hash1+hash2", "1", []string{"2"}, []Step{{Rule: "tier", Outcome: "1 wins"}}); err != nil {
+		t.Fatalf("SetChoice on migrated ledger: %v", err)
+	}
+
+	var version int
+	if err := l.DB().QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
+		t.Fatalf("reading schema_version: %v", err)
+	}
+	if version != currentSchemaVersion {
+		t.Errorf("schema_version = %d, want %d", version, currentSchemaVersion)
 	}
 }

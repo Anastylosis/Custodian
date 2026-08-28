@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS candidate_group (
   verdict     TEXT NOT NULL,
   reason      TEXT NOT NULL DEFAULT '',
   reclaimable INTEGER NOT NULL DEFAULT 0,
+  keeper      TEXT,
   seen_run    INTEGER NOT NULL,
   gone_run    INTEGER
 );
@@ -167,3 +168,14 @@ CREATE TABLE IF NOT EXISTS candidate_evidence (
 );
 
 CREATE INDEX IF NOT EXISTS idx_candidate_evidence_signature ON candidate_evidence(signature);
+
+-- One row per rule a keeper.Choose evaluated for a group, in order, so a
+-- report can quote why a keeper won without re-running the rules.
+CREATE TABLE IF NOT EXISTS candidate_step (
+  signature TEXT NOT NULL REFERENCES candidate_group(signature) ON DELETE CASCADE,
+  ord       INTEGER NOT NULL,
+  rule      TEXT NOT NULL,
+  outcome   TEXT NOT NULL,
+  detail    TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(signature, ord)
+);

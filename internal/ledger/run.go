@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -59,13 +60,39 @@ func (l *Ledger) FinishRun(ctx context.Context, runID int64, summary RunSummary)
 	return nil
 }
 
-// LastRun returns the most recently started run, or nil if none has run yet.
+// LastRun returns the most recently started run of any kind, or nil if
+// none has run yet.
 func (l *Ledger) LastRun(ctx context.Context) (*Run, error) {
 	row := l.db.QueryRowContext(ctx,
 		`SELECT id, started_at, finished_at, kind, since, scenes_seen, files_seen,
 		        scenes_gone, stash_version, notes
 		 FROM run ORDER BY id DESC LIMIT 1`)
+	return scanRun(row, "reading last run")
+}
 
+// LastRunOfKind returns the most recently started run whose kind is one of
+// kinds — e.g. LastRunOfKind(ctx, "full", "incremental") for the last sync,
+// as opposed to LastRun, which would also match a "scan" run. Nil if none
+// has run yet.
+func (l *Ledger) LastRunOfKind(ctx context.Context, kinds ...string) (*Run, error) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(kinds))
+	args := make([]any, len(kinds))
+	for i, k := range kinds {
+		placeholders[i] = "?"
+		args[i] = k
+	}
+	row := l.db.QueryRowContext(ctx, fmt.Sprintf(
+		`SELECT id, started_at, finished_at, kind, since, scenes_seen, files_seen,
+		        scenes_gone, stash_version, notes
+		 FROM run WHERE kind IN (%s) ORDER BY id DESC LIMIT 1`, strings.Join(placeholders, ",")),
+		args...)
+	return scanRun(row, "reading last run of kind")
+}
+
+func scanRun(row *sql.Row, errContext string) (*Run, error) {
 	var r Run
 	var finishedAt, since sql.NullString
 	err := row.Scan(&r.ID, &r.StartedAt, &finishedAt, &r.Kind, &since, &r.ScenesSeen,
@@ -74,7 +101,7 @@ func (l *Ledger) LastRun(ctx context.Context) (*Run, error) {
 	case err == sql.ErrNoRows:
 		return nil, nil
 	case err != nil:
-		return nil, fmt.Errorf("ledger: reading last run: %w", err)
+		return nil, fmt.Errorf("ledger: %s: %w", errContext, err)
 	}
 	r.FinishedAt = finishedAt.String
 	r.Since = since.String

@@ -25,7 +25,8 @@ type Evidence struct {
 }
 
 // Group is a duplicate-candidate group: the scenes evidence ties together,
-// the evidence itself, and the verdict a policy reached.
+// the evidence itself, the verdict a policy reached, and — once `plan` has
+// run — the keeper it chose and the steps that decided it.
 type Group struct {
 	Signature   string
 	SceneIDs    []string
@@ -33,6 +34,16 @@ type Group struct {
 	Verdict     string
 	Reason      string
 	Reclaimable int64
+	Keeper      string
+	Steps       []Step
+}
+
+// Step is one rule internal/keeper evaluated while choosing a group's
+// keeper: the rule's name, what it decided, and why.
+type Step struct {
+	Rule    string
+	Outcome string
+	Detail  string
 }
 
 // GroupFilter narrows Groups.
@@ -147,7 +158,7 @@ func (s *groupStatements) upsertGroup(ctx context.Context, runID int64, g Group)
 // Groups returns candidate groups matching filter, each with its scenes and
 // evidence populated.
 func (l *Ledger) Groups(ctx context.Context, filter GroupFilter) ([]Group, error) {
-	query := `SELECT signature, verdict, reason, reclaimable FROM candidate_group WHERE 1=1`
+	query := `SELECT signature, verdict, reason, reclaimable, keeper FROM candidate_group WHERE 1=1`
 	var args []any
 	if !filter.IncludeGone {
 		query += ` AND gone_run IS NULL`
@@ -165,10 +176,12 @@ func (l *Ledger) Groups(ctx context.Context, filter GroupFilter) ([]Group, error
 	var groups []Group
 	for rows.Next() {
 		var g Group
-		if err := rows.Scan(&g.Signature, &g.Verdict, &g.Reason, &g.Reclaimable); err != nil {
+		var keeper sql.NullString
+		if err := rows.Scan(&g.Signature, &g.Verdict, &g.Reason, &g.Reclaimable, &keeper); err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("ledger: scanning candidate_group row: %w", err)
 		}
+		g.Keeper = keeper.String
 		groups = append(groups, g)
 	}
 	if err := rows.Err(); err != nil {
@@ -189,6 +202,12 @@ func (l *Ledger) Groups(ctx context.Context, filter GroupFilter) ([]Group, error
 			return nil, err
 		}
 		groups[i].Evidence = ev
+
+		steps, err := l.groupSteps(ctx, groups[i].Signature)
+		if err != nil {
+			return nil, err
+		}
+		groups[i].Steps = steps
 	}
 	return groups, nil
 }
@@ -234,6 +253,84 @@ func (l *Ledger) groupEvidence(ctx context.Context, signature string) ([]Evidenc
 		evs = append(evs, e)
 	}
 	return evs, rows.Err()
+}
+
+func (l *Ledger) groupSteps(ctx context.Context, signature string) ([]Step, error) {
+	rows, err := l.db.QueryContext(ctx,
+		`SELECT rule, outcome, detail FROM candidate_step WHERE signature = ? ORDER BY ord`, signature)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: querying candidate_step for %s: %w", signature, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var steps []Step
+	for rows.Next() {
+		var s Step
+		if err := rows.Scan(&s.Rule, &s.Outcome, &s.Detail); err != nil {
+			return nil, fmt.Errorf("ledger: scanning candidate_step row: %w", err)
+		}
+		steps = append(steps, s)
+	}
+	return steps, rows.Err()
+}
+
+// SetChoice records phase 3a's pick for signature: the keeper scene id and
+// the steps that decided it. Reclaimable is recomputed from losers' primary
+// file sizes and stored on the group, so status and groups reflect it.
+//
+// Takes keeper/losers/steps rather than a keeper.Choice to avoid a ledger →
+// keeper import cycle (keeper already imports ledger for Group/PrimaryFile).
+func (l *Ledger) SetChoice(ctx context.Context, signature, keeper string, losers []string, steps []Step) error {
+	reclaimable, err := l.sumPrimaryFileSizes(ctx, losers)
+	if err != nil {
+		return err
+	}
+
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("ledger: beginning SetChoice transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE candidate_group SET keeper = ?, reclaimable = ? WHERE signature = ?`,
+		keeper, reclaimable, signature); err != nil {
+		return fmt.Errorf("ledger: setting keeper for %s: %w", signature, err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM candidate_step WHERE signature = ?`, signature); err != nil {
+		return fmt.Errorf("ledger: clearing candidate_step for %s: %w", signature, err)
+	}
+	for i, s := range steps {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO candidate_step(signature, ord, rule, outcome, detail) VALUES(?, ?, ?, ?, ?)`,
+			signature, i, s.Rule, s.Outcome, s.Detail); err != nil {
+			return fmt.Errorf("ledger: adding candidate_step to %s: %w", signature, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ledger: committing SetChoice: %w", err)
+	}
+	return nil
+}
+
+func (l *Ledger) sumPrimaryFileSizes(ctx context.Context, sceneIDs []string) (int64, error) {
+	if len(sceneIDs) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, len(sceneIDs))
+	args := make([]any, len(sceneIDs))
+	for i, id := range sceneIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf(`SELECT COALESCE(SUM(size), 0) FROM file
+		WHERE is_primary = 1 AND scene_id IN (%s)`, strings.Join(placeholders, ","))
+	var sum int64
+	if err := l.db.QueryRowContext(ctx, query, args...).Scan(&sum); err != nil {
+		return 0, fmt.Errorf("ledger: summing loser primary file sizes: %w", err)
+	}
+	return sum, nil
 }
 
 func nullableFloat(v *float64) any {
@@ -302,11 +399,17 @@ func (l *Ledger) SharedStashIDs(ctx context.Context) ([]StashIDCluster, error) {
 	return clusters, rows.Err()
 }
 
-// PrimaryFile is a scene's primary file, as `groups` formatting quotes it.
+// PrimaryFile is a scene's primary file, as `groups` and `plan` formatting
+// quote it and as internal/keeper scores it.
 type PrimaryFile struct {
-	Duration float64
-	Size     int64
-	Basename string
+	Path       string
+	Basename   string
+	Size       int64
+	Width      int
+	Height     int
+	Duration   float64
+	VideoCodec string
+	BitRate    int64
 }
 
 // PrimaryFiles returns the primary file metadata for each of the given
@@ -323,7 +426,7 @@ func (l *Ledger) PrimaryFiles(ctx context.Context, sceneIDs []string) (map[strin
 		placeholders[i] = "?"
 		args[i] = id
 	}
-	query := fmt.Sprintf(`SELECT scene_id, duration, size, basename FROM file
+	query := fmt.Sprintf(`SELECT scene_id, path, basename, size, width, height, duration, video_codec, bit_rate FROM file
 		WHERE is_primary = 1 AND scene_id IN (%s)`, strings.Join(placeholders, ","))
 
 	rows, err := l.db.QueryContext(ctx, query, args...)
@@ -335,7 +438,8 @@ func (l *Ledger) PrimaryFiles(ctx context.Context, sceneIDs []string) (map[strin
 	for rows.Next() {
 		var sceneID string
 		var pf PrimaryFile
-		if err := rows.Scan(&sceneID, &pf.Duration, &pf.Size, &pf.Basename); err != nil {
+		if err := rows.Scan(&sceneID, &pf.Path, &pf.Basename, &pf.Size, &pf.Width, &pf.Height,
+			&pf.Duration, &pf.VideoCodec, &pf.BitRate); err != nil {
 			return nil, fmt.Errorf("ledger: scanning primary file row: %w", err)
 		}
 		out[sceneID] = pf
