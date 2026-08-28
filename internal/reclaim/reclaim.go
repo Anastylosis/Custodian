@@ -146,15 +146,7 @@ func (a *applier) backup(ctx context.Context, rep *Report) error {
 	if err != nil {
 		return err
 	}
-	// IncludeBlobs is deliberately left false. DownloadVerifiedBackup can
-	// only verify a raw SQLite file (stash.VerifySQLite checks the SQLite
-	// header); a server storing blobs on the filesystem — a normal
-	// configuration, not an edge case — answers an IncludeBlobs request
-	// with a .zip bundling the database and the blobs together, which
-	// VerifySQLite correctly refuses as "not a SQLite database". Asking for
-	// blobs here does not make the backup safer: it makes step 1 of §4.4
-	// fail every time against exactly that configuration, so Apply can
-	// never take its gating backup and never writes anything at all.
+	// Never IncludeBlobs: with blobs on disk the server answers with a zip, which cannot be verified.
 	m, err := a.client.DownloadVerifiedBackup(ctx, stash.BackupOptions{}, a.opts.BackupDir)
 	if err != nil {
 		_ = a.l.MarkMutation(ctx, id, false, err.Error())

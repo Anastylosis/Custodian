@@ -34,6 +34,7 @@ jobs:
       # fixtures and a fake VFS, not a live Stash, so it should never need a
       # network reach.
       offline-isolation: true
+      check-aur-srcinfo: true
 
   # Custodian *mutates* a library — merge, dedup, scan — and until this job
   # nothing in CI had ever pointed it at a running Stash. The sibling repos
