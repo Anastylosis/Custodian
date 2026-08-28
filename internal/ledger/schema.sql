@@ -130,3 +130,40 @@ CREATE TABLE IF NOT EXISTS mutation_log (
   to_value   TEXT NOT NULL DEFAULT '',
   note       TEXT NOT NULL DEFAULT ''
 );
+
+-- Duplicate-candidate groups, replaced wholesale by each `scan` run. Keyed
+-- by signature (sorted oshashes of member scenes' primary files, see
+-- internal/evidence) so a group survives Stash scene-id churn; a group a
+-- run doesn't see any more is tombstoned, not removed.
+CREATE TABLE IF NOT EXISTS candidate_group (
+  signature   TEXT PRIMARY KEY,
+  verdict     TEXT NOT NULL,
+  reason      TEXT NOT NULL DEFAULT '',
+  reclaimable INTEGER NOT NULL DEFAULT 0,
+  seen_run    INTEGER NOT NULL,
+  gone_run    INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_group_verdict ON candidate_group(verdict);
+CREATE INDEX IF NOT EXISTS idx_candidate_group_gone_run ON candidate_group(gone_run);
+
+-- Member scenes of a candidate_group, replaced wholesale with its group.
+CREATE TABLE IF NOT EXISTS candidate_scene (
+  signature TEXT NOT NULL REFERENCES candidate_group(signature) ON DELETE CASCADE,
+  scene_id  TEXT NOT NULL,
+  PRIMARY KEY(signature, scene_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_scene_scene ON candidate_scene(scene_id);
+
+-- Evidence a generator found for a candidate_group, replaced wholesale with
+-- its group.
+CREATE TABLE IF NOT EXISTS candidate_evidence (
+  signature TEXT NOT NULL REFERENCES candidate_group(signature) ON DELETE CASCADE,
+  generator TEXT NOT NULL,
+  kind      TEXT NOT NULL,
+  detail    TEXT NOT NULL DEFAULT '',
+  value     REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_evidence_signature ON candidate_evidence(signature);

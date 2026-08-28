@@ -16,6 +16,10 @@ type Stats struct {
 	ScenesWithoutStashID    int
 	BytesLive               int64
 	FilesWithoutPhash       int
+	GroupsCertain           int
+	GroupsConflicted        int
+	GroupsDismissed         int
+	ReclaimableBytes        int64
 	LastRun                 *Run
 }
 
@@ -61,6 +65,10 @@ func (l *Ledger) Stats(ctx context.Context) (Stats, error) {
 		return Stats{}, fmt.Errorf("ledger: counting files without phash: %w", err)
 	}
 
+	if err := l.statsGroups(ctx, &st); err != nil {
+		return Stats{}, err
+	}
+
 	lastRun, err := l.LastRun(ctx)
 	if err != nil {
 		return Stats{}, err
@@ -68,4 +76,35 @@ func (l *Ledger) Stats(ctx context.Context) (Stats, error) {
 	st.LastRun = lastRun
 
 	return st, nil
+}
+
+// statsGroups fills the duplicate-group counts by verdict and the total
+// reclaimable bytes across live groups.
+func (l *Ledger) statsGroups(ctx context.Context, st *Stats) error {
+	rows, err := l.db.QueryContext(ctx,
+		`SELECT verdict, COUNT(*), COALESCE(SUM(reclaimable), 0)
+		 FROM candidate_group WHERE gone_run IS NULL GROUP BY verdict`)
+	if err != nil {
+		return fmt.Errorf("ledger: counting candidate_group by verdict: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var verdict string
+		var count int
+		var reclaimable int64
+		if err := rows.Scan(&verdict, &count, &reclaimable); err != nil {
+			return fmt.Errorf("ledger: scanning candidate_group verdict row: %w", err)
+		}
+		switch verdict {
+		case VerdictCertain:
+			st.GroupsCertain = count
+		case VerdictConflicted:
+			st.GroupsConflicted = count
+		case VerdictDismissed:
+			st.GroupsDismissed = count
+		}
+		st.ReclaimableBytes += reclaimable
+	}
+	return rows.Err()
 }

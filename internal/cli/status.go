@@ -60,6 +60,10 @@ func formatStats(stats ledger.Stats) string {
 	s += fmt.Sprintf("without stash_id:  %d\n", stats.ScenesWithoutStashID)
 	s += fmt.Sprintf("files no phash:    %d\n", stats.FilesWithoutPhash)
 	s += fmt.Sprintf("bytes on disk:     %s\n", confirm.HumanBytes(stats.BytesLive))
+	s += fmt.Sprintf("duplicate groups:  %d (certain %d, conflicted %d, dismissed %d)\n",
+		stats.GroupsCertain+stats.GroupsConflicted+stats.GroupsDismissed,
+		stats.GroupsCertain, stats.GroupsConflicted, stats.GroupsDismissed)
+	s += fmt.Sprintf("reclaimable:       %s\n", confirm.HumanBytes(stats.ReclaimableBytes))
 	if stats.LastRun != nil {
 		s += fmt.Sprintf("last sync:         %s (%s), %d changed\n",
 			stats.LastRun.StartedAt, stats.LastRun.Kind, stats.LastRun.ScenesSeen)
