@@ -205,6 +205,87 @@ func (l *Ledger) TombstoneUnseen(ctx context.Context, runID int64) (scenes, file
 	return int(sceneCount), int(fileCount), nil
 }
 
+// SceneFile is one live file attached to a scene — what the multifile
+// generator compares to pick which file survives.
+type SceneFile struct {
+	ID       string
+	Path     string
+	Basename string
+	Size     int64
+}
+
+// MultiFileScenes returns, for every live scene with more than one live
+// file, that scene's files — Stash attaches a re-detected file to an
+// existing scene by oshash/md5, so files sharing a scene are
+// byte-equivalent (REBUILD.md §1.5, "Known Stash behaviours").
+func (l *Ledger) MultiFileScenes(ctx context.Context) (map[string][]SceneFile, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT scene_id, id, path, basename, size
+		FROM file
+		WHERE gone_run IS NULL AND scene_id IN (
+			SELECT scene_id FROM file WHERE gone_run IS NULL GROUP BY scene_id HAVING COUNT(*) > 1
+		)
+		ORDER BY scene_id, id`)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: querying multi-file scenes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[string][]SceneFile{}
+	for rows.Next() {
+		var sceneID string
+		var f SceneFile
+		if err := rows.Scan(&sceneID, &f.ID, &f.Path, &f.Basename, &f.Size); err != nil {
+			return nil, fmt.Errorf("ledger: scanning multi-file scene row: %w", err)
+		}
+		out[sceneID] = append(out[sceneID], f)
+	}
+	return out, rows.Err()
+}
+
+// SceneSignals is one live scene's identity for the filename and title_date
+// generators: its own title/date/studio plus its primary file's basename,
+// oshash, duration and size.
+type SceneSignals struct {
+	SceneID  string
+	Title    string
+	Date     string
+	StudioID string
+	Basename string
+	Path     string
+	Oshash   string
+	Duration float64
+	Size     int64
+}
+
+// LiveSceneSignals returns SceneSignals for every live scene with a live
+// primary file, in scene id order.
+func (l *Ledger) LiveSceneSignals(ctx context.Context) ([]SceneSignals, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT s.id, s.title, s.date, s.studio_id, f.basename, f.path, f.oshash, f.duration, f.size
+		FROM scene s
+		JOIN file f ON f.scene_id = s.id AND f.is_primary = 1 AND f.gone_run IS NULL
+		WHERE s.gone_run IS NULL
+		ORDER BY s.id`)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: querying live scene signals: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []SceneSignals
+	for rows.Next() {
+		var sig SceneSignals
+		var oshash sql.NullString
+		if err := rows.Scan(&sig.SceneID, &sig.Title, &sig.Date, &sig.StudioID,
+			&sig.Basename, &sig.Path, &oshash, &sig.Duration, &sig.Size); err != nil {
+			return nil, fmt.Errorf("ledger: scanning live scene signal row: %w", err)
+		}
+		sig.Oshash = oshash.String
+		out = append(out, sig)
+	}
+	return out, rows.Err()
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1

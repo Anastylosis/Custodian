@@ -25,7 +25,7 @@ func newGroupsCmd() *cobra.Command {
 		Short: "List duplicate-candidate groups from the last scan",
 		RunE:  runGroups,
 	}
-	cmd.Flags().StringVar(&flagGroupsVerdict, "verdict", "", "filter to one verdict: certain, conflicted, dismissed, partial, mistag")
+	cmd.Flags().StringVar(&flagGroupsVerdict, "verdict", "", "filter to one verdict: certain, conflicted, dismissed, partial, mistag, probable, rejected")
 	cmd.Flags().BoolVar(&flagGroupsJSON, "json", false, "emit groups as JSON")
 	cmd.Flags().IntVar(&flagGroupsLimit, "limit", 0, "limit the number of groups printed (0 = no limit)")
 	cmd.Flags().StringVar(&flagGroupsLedger, "ledger", "", "path to the ledger sqlite file (default: alongside --db)")
@@ -58,6 +58,10 @@ func runGroups(cmd *cobra.Command, _ []string) error {
 	files, err := l.PrimaryFiles(ctx, allSceneIDs(groups))
 	if err != nil {
 		return err
+	}
+	if flagGroupsVerdict == ledger.VerdictProbable {
+		fmt.Fprintln(out, "probable groups are review-only: plan does not choose a keeper for them yet")
+		fmt.Fprintln(out)
 	}
 	fmt.Fprint(out, formatGroups(groups, files))
 	return nil

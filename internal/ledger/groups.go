@@ -36,6 +36,16 @@ const (
 	// VerdictReclaimed is where `prune` leaves a group: the losers were
 	// merged into the keeper and their files deleted from disk.
 	VerdictReclaimed = "reclaimed"
+
+	// VerdictProbable is a phash/filename/title_date group whose durations
+	// agree but carries no shared_stash_id evidence to make it certain —
+	// review-only: `plan` never chooses a keeper for one (REBUILD.md §4.2).
+	VerdictProbable = "probable"
+
+	// VerdictRejected is a group whose scenes carry different stash_ids for
+	// the same endpoint (evidence stash_id_conflict) — a candidate stash-box
+	// mis-tag. Stays visible; never dropped.
+	VerdictRejected = "rejected"
 )
 
 // Evidence is one fact a generator found supporting or informing a
@@ -125,6 +135,8 @@ type groupStatements struct {
 	insScene *sql.Stmt
 	delEv    *sql.Stmt
 	insEv    *sql.Stmt
+	delStep  *sql.Stmt
+	insStep  *sql.Stmt
 }
 
 func prepareGroupStatements(ctx context.Context, tx *sql.Tx) (*groupStatements, error) {
@@ -145,6 +157,8 @@ func prepareGroupStatements(ctx context.Context, tx *sql.Tx) (*groupStatements, 
 		{&s.insScene, `INSERT INTO candidate_scene(signature, scene_id) VALUES(?, ?)`},
 		{&s.delEv, `DELETE FROM candidate_evidence WHERE signature = ?`},
 		{&s.insEv, `INSERT INTO candidate_evidence(signature, generator, kind, detail, value) VALUES(?, ?, ?, ?, ?)`},
+		{&s.delStep, `DELETE FROM candidate_step WHERE signature = ?`},
+		{&s.insStep, `INSERT INTO candidate_step(signature, ord, rule, outcome, detail) VALUES(?, ?, ?, ?, ?)`},
 	} {
 		*step.dst, err = prep(step.query)
 		if err != nil {
@@ -156,7 +170,7 @@ func prepareGroupStatements(ctx context.Context, tx *sql.Tx) (*groupStatements, 
 }
 
 func (s *groupStatements) close() {
-	for _, stmt := range []*sql.Stmt{s.group, s.delScene, s.insScene, s.delEv, s.insEv} {
+	for _, stmt := range []*sql.Stmt{s.group, s.delScene, s.insScene, s.delEv, s.insEv, s.delStep, s.insStep} {
 		if stmt != nil {
 			_ = stmt.Close()
 		}
@@ -185,7 +199,45 @@ func (s *groupStatements) upsertGroup(ctx context.Context, runID int64, g Group)
 			return fmt.Errorf("ledger: adding candidate_evidence to %s: %w", g.Signature, err)
 		}
 	}
+
+	// Steps are normally written by `plan` (SetChoice), but a generator can
+	// pre-populate them at scan time — the multifile generator's file_choice
+	// step, which names the surviving file rather than a scene keeper. Only
+	// touch candidate_step when the group actually carries any, so `plan`
+	// still owns the common case untouched.
+	if len(g.Steps) == 0 {
+		return nil
+	}
+	if _, err := s.delStep.ExecContext(ctx, g.Signature); err != nil {
+		return fmt.Errorf("ledger: clearing candidate_step for %s: %w", g.Signature, err)
+	}
+	for i, st := range g.Steps {
+		if _, err := s.insStep.ExecContext(ctx, g.Signature, i, st.Rule, st.Outcome, st.Detail); err != nil {
+			return fmt.Errorf("ledger: adding candidate_step to %s: %w", g.Signature, err)
+		}
+	}
 	return nil
+}
+
+// ExistingSignatures returns every signature candidate_group has ever held
+// (live or gone) — what `scan` uses to report a generator's yield as new vs.
+// already known.
+func (l *Ledger) ExistingSignatures(ctx context.Context) (map[string]bool, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT signature FROM candidate_group`)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: querying existing candidate_group signatures: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[string]bool{}
+	for rows.Next() {
+		var sig string
+		if err := rows.Scan(&sig); err != nil {
+			return nil, fmt.Errorf("ledger: scanning candidate_group signature: %w", err)
+		}
+		out[sig] = true
+	}
+	return out, rows.Err()
 }
 
 // Groups returns candidate groups matching filter, each with its scenes and
@@ -504,6 +556,9 @@ type PrimaryFile struct {
 	Duration   float64
 	VideoCodec string
 	BitRate    int64
+	// Oshash is empty when the file carries none — the evidence generators'
+	// group-signature fallback ("scene:<id>") applies in that case.
+	Oshash string
 }
 
 // PrimaryFiles returns the primary file metadata for each of the given
@@ -514,14 +569,9 @@ func (l *Ledger) PrimaryFiles(ctx context.Context, sceneIDs []string) (map[strin
 		return out, nil
 	}
 
-	placeholders := make([]string, len(sceneIDs))
-	args := make([]any, len(sceneIDs))
-	for i, id := range sceneIDs {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-	query := fmt.Sprintf(`SELECT scene_id, path, basename, size, width, height, duration, video_codec, bit_rate FROM file
-		WHERE is_primary = 1 AND scene_id IN (%s)`, strings.Join(placeholders, ","))
+	placeholders, args := inClause(sceneIDs)
+	query := fmt.Sprintf(`SELECT scene_id, path, basename, size, width, height, duration, video_codec, bit_rate, oshash FROM file
+		WHERE is_primary = 1 AND scene_id IN (%s)`, placeholders)
 
 	rows, err := l.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -532,11 +582,45 @@ func (l *Ledger) PrimaryFiles(ctx context.Context, sceneIDs []string) (map[strin
 	for rows.Next() {
 		var sceneID string
 		var pf PrimaryFile
+		var oshash sql.NullString
 		if err := rows.Scan(&sceneID, &pf.Path, &pf.Basename, &pf.Size, &pf.Width, &pf.Height,
-			&pf.Duration, &pf.VideoCodec, &pf.BitRate); err != nil {
+			&pf.Duration, &pf.VideoCodec, &pf.BitRate, &oshash); err != nil {
 			return nil, fmt.Errorf("ledger: scanning primary file row: %w", err)
 		}
+		pf.Oshash = oshash.String
 		out[sceneID] = pf
+	}
+	return out, rows.Err()
+}
+
+// SceneStashIDs returns every live stash_id each of the given scenes
+// carries — the raw material evidence generators use to detect a
+// stash_id_conflict (differing ids for the same endpoint) without
+// duplicating the stash_id generator's own clustering. StashIDRef is
+// canonical.go's type; reused here rather than redeclared.
+func (l *Ledger) SceneStashIDs(ctx context.Context, sceneIDs []string) (map[string][]StashIDRef, error) {
+	out := make(map[string][]StashIDRef, len(sceneIDs))
+	if len(sceneIDs) == 0 {
+		return out, nil
+	}
+
+	placeholders, args := inClause(sceneIDs)
+	query := fmt.Sprintf(`SELECT scene_id, endpoint, stash_id FROM scene_stash_id
+		WHERE scene_id IN (%s) ORDER BY scene_id`, placeholders)
+
+	rows, err := l.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: querying scene stash_ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var sceneID string
+		var ref StashIDRef
+		if err := rows.Scan(&sceneID, &ref.Endpoint, &ref.StashID); err != nil {
+			return nil, fmt.Errorf("ledger: scanning scene stash_id row: %w", err)
+		}
+		out[sceneID] = append(out[sceneID], ref)
 	}
 	return out, rows.Err()
 }

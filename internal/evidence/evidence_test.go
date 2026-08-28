@@ -15,8 +15,15 @@ func durationEvidence(a, b float64) Evidence {
 	return durationSpreadEvidence(a, b)
 }
 
+// sharedStashIDEvidence is what puts a group on the certain/conflicted side
+// of Judge's switch rather than the probable/conflicted side.
+func sharedStashIDEvidence() Evidence {
+	return Evidence{Generator: "stash_id", Kind: "shared_stash_id", Detail: "https://sb uuid-1"}
+}
+
 func TestPolicyJudgeCertainWhenAllPairsAgree(t *testing.T) {
 	g := Group{Evidence: []Evidence{
+		sharedStashIDEvidence(),
 		durationEvidence(100, 100.5),
 	}}
 	Policy{Tolerance: DefaultTolerance}.Judge(&g)
@@ -27,6 +34,7 @@ func TestPolicyJudgeCertainWhenAllPairsAgree(t *testing.T) {
 
 func TestPolicyJudgeConflictedNamesTheWorstPair(t *testing.T) {
 	g := Group{Evidence: []Evidence{
+		sharedStashIDEvidence(),
 		durationEvidence(1000, 1010), // agrees: spread 10 <= min(20.2, 120)
 		durationEvidence(1000, 200),  // spread 800, violates
 		durationEvidence(1010, 200),  // spread 810, violates — the worst
@@ -42,7 +50,7 @@ func TestPolicyJudgeConflictedNamesTheWorstPair(t *testing.T) {
 
 func TestPolicyJudgeToleranceEdgeAgrees(t *testing.T) {
 	// longest=1000, limit=min(2%*1000, 120)=20; spread exactly 20 agrees.
-	g := Group{Evidence: []Evidence{durationEvidence(1000, 980)}}
+	g := Group{Evidence: []Evidence{sharedStashIDEvidence(), durationEvidence(1000, 980)}}
 	Policy{Tolerance: DefaultTolerance}.Judge(&g)
 	if g.Verdict != Certain {
 		t.Errorf("Verdict = %q, want %q (spread == limit should agree)", g.Verdict, Certain)
@@ -50,7 +58,7 @@ func TestPolicyJudgeToleranceEdgeAgrees(t *testing.T) {
 }
 
 func TestPolicyJudgeJustOverToleranceConflicts(t *testing.T) {
-	g := Group{Evidence: []Evidence{durationEvidence(1000, 979.9)}}
+	g := Group{Evidence: []Evidence{sharedStashIDEvidence(), durationEvidence(1000, 979.9)}}
 	Policy{Tolerance: DefaultTolerance}.Judge(&g)
 	if g.Verdict != Conflicted {
 		t.Errorf("Verdict = %q, want %q (spread just over limit should conflict)", g.Verdict, Conflicted)
@@ -69,11 +77,75 @@ func TestPolicyJudgeDefaultsToCertainWithNoDurationEvidence(t *testing.T) {
 
 func TestPolicyJudgeIgnoresUnparsableDurationSpread(t *testing.T) {
 	g := Group{Evidence: []Evidence{
+		sharedStashIDEvidence(),
 		{Generator: "stash_id", Kind: "duration_spread", Detail: "garbage"},
 	}}
 	Policy{Tolerance: DefaultTolerance}.Judge(&g)
 	if g.Verdict != Certain {
 		t.Errorf("Verdict = %q, want %q for unparsable evidence", g.Verdict, Certain)
+	}
+}
+
+// --- probable / rejected / multifile — phase 4 additions ---
+
+func TestPolicyJudgeProbableWhenNoStashIDButDurationsAgree(t *testing.T) {
+	g := Group{Evidence: []Evidence{
+		{Generator: "phash", Kind: "phash_group", Detail: "distance 4"},
+		durationSpreadEvidenceFor("phash", 100, 100.5),
+	}}
+	Policy{Tolerance: DefaultTolerance}.Judge(&g)
+	if g.Verdict != Probable {
+		t.Errorf("Verdict = %q, want %q", g.Verdict, Probable)
+	}
+}
+
+func TestPolicyJudgeConflictedWithoutStashIDStaysConflicted(t *testing.T) {
+	g := Group{Evidence: []Evidence{
+		{Generator: "title_date", Kind: "title_date", Detail: "a scene / 2024-01-01"},
+		durationSpreadEvidenceFor("title_date", 1000, 200),
+	}}
+	Policy{Tolerance: DefaultTolerance}.Judge(&g)
+	if g.Verdict != Conflicted {
+		t.Errorf("Verdict = %q, want %q", g.Verdict, Conflicted)
+	}
+}
+
+func TestPolicyJudgeRejectedWinsOverAgreeingDurations(t *testing.T) {
+	g := Group{Evidence: []Evidence{
+		{Generator: "phash", Kind: "phash_group", Detail: "distance 4"},
+		durationSpreadEvidenceFor("phash", 100, 100.5),
+		{Generator: "phash", Kind: "stash_id_conflict", Detail: "https://sb a vs b"},
+	}}
+	Policy{Tolerance: DefaultTolerance}.Judge(&g)
+	if g.Verdict != Rejected {
+		t.Errorf("Verdict = %q, want %q", g.Verdict, Rejected)
+	}
+	if g.Reason != "https://sb a vs b" {
+		t.Errorf("Reason = %q, want the stash_id_conflict detail", g.Reason)
+	}
+}
+
+func TestPolicyJudgeRejectedWinsOverSharedStashID(t *testing.T) {
+	// Contradictory as constructed (a group cannot really carry both a
+	// shared stash_id and a conflicting one), but it pins down the stated
+	// precedence: stash_id_conflict wins over everything else.
+	g := Group{Evidence: []Evidence{
+		sharedStashIDEvidence(),
+		{Generator: "phash", Kind: "stash_id_conflict", Detail: "https://sb a vs b"},
+	}}
+	Policy{Tolerance: DefaultTolerance}.Judge(&g)
+	if g.Verdict != Rejected {
+		t.Errorf("Verdict = %q, want %q", g.Verdict, Rejected)
+	}
+}
+
+func TestPolicyJudgeMultifileIsAlwaysCertain(t *testing.T) {
+	g := Group{Evidence: []Evidence{
+		{Generator: "multifile", Kind: "multifile", Detail: "/a.mp4; /b.mp4", Value: floatPtr(2)},
+	}}
+	Policy{Tolerance: DefaultTolerance}.Judge(&g)
+	if g.Verdict != Certain {
+		t.Errorf("Verdict = %q, want %q", g.Verdict, Certain)
 	}
 }
 

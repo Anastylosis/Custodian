@@ -18,9 +18,12 @@ func TestFormatStatsNeverSynced(t *testing.T) {
 		"without stash_id:  0\n" +
 		"files no phash:    0\n" +
 		"bytes on disk:     0 B\n" +
-		"duplicate groups:  0 (certain 0, conflicted 0, dismissed 0, partial 0, mistag 0)\n" +
+		"duplicate groups:  0 (certain 0, conflicted 0, dismissed 0, partial 0, mistag 0, probable 0, rejected 0)\n" +
 		"partial:           0 (0 B)\n" +
 		"mistag:            0\n" +
+		"probable:          0 (0 B) — review only\n" +
+		"rejected:          0 (0 B)\n" +
+		"multifile:         0 scenes\n" +
 		"reclaimable:       0 B\n" +
 		"quarantined:       0 groups (0 B)\n" +
 		"reclaimed:         0 groups (0 B)\n" +
@@ -38,6 +41,8 @@ func TestFormatStatsWithLastRun(t *testing.T) {
 		BytesLive: 1 << 40, FilesWithoutPhash: 1400,
 		GroupsCertain: 843, GroupsConflicted: 410, GroupsDismissed: 2,
 		GroupsPartial: 5, PartialBytes: 6 << 30, GroupsMistag: 7,
+		GroupsProbable: 9, ProbableBytes: 7 << 30, GroupsRejected: 1, RejectedBytes: 8 << 30,
+		GroupsMultifile:   4,
 		ReclaimableBytes:  1<<40 + 1<<39, // 1.5 TiB
 		GroupsQuarantined: 12, QuarantinedBytes: 2 << 30,
 		GroupsReclaimed: 3, ReclaimedBytes: 4 << 30,
@@ -53,9 +58,12 @@ func TestFormatStatsWithLastRun(t *testing.T) {
 		"without stash_id:  32272",
 		"files no phash:    1400",
 		"bytes on disk:     1.00 TiB",
-		"duplicate groups:  1267 (certain 843, conflicted 410, dismissed 2, partial 5, mistag 7)",
+		"duplicate groups:  1277 (certain 843, conflicted 410, dismissed 2, partial 5, mistag 7, probable 9, rejected 1)",
 		"partial:           5 (6.00 GiB)",
 		"mistag:            7",
+		"probable:          9 (7.00 GiB) — review only",
+		"rejected:          1 (8.00 GiB)",
+		"multifile:         4 scenes",
 		"reclaimable:       1.50 TiB",
 		"quarantined:       12 groups (2.00 GiB)",
 		"reclaimed:         3 groups (4.00 GiB)",

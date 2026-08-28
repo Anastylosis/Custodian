@@ -3,8 +3,6 @@ package evidence
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/Anastylosis/Custodian/internal/ledger"
 )
@@ -37,21 +35,14 @@ func (StashIDGenerator) Find(ctx context.Context, l *ledger.Ledger) ([]Group, er
 // largest — phase 2 does not choose a keeper, so this is an upper bound.
 func stashIDGroup(c ledger.StashIDCluster) Group {
 	sceneIDs := make([]string, len(c.Scenes))
-	tokens := make([]string, len(c.Scenes))
-	var total, largest int64
+	oshash := make(map[string]string, len(c.Scenes))
+	sizes := make([]int64, len(c.Scenes))
 	for i, sc := range c.Scenes {
 		sceneIDs[i] = sc.SceneID
-		if sc.Oshash != "" {
-			tokens[i] = sc.Oshash
-		} else {
-			tokens[i] = "scene:" + sc.SceneID
-		}
-		total += sc.Size
-		if sc.Size > largest {
-			largest = sc.Size
-		}
+		oshash[sc.SceneID] = sc.Oshash
+		sizes[i] = sc.Size
 	}
-	sort.Strings(tokens)
+	total, largest := sumAndLargest(sizes)
 
 	evs := []Evidence{{
 		Generator: "stash_id",
@@ -65,22 +56,15 @@ func stashIDGroup(c ledger.StashIDCluster) Group {
 	}
 
 	return Group{
-		Signature:   strings.Join(tokens, "+"),
+		Signature:   groupSignature(sceneIDs, oshash),
 		SceneIDs:    sceneIDs,
 		Evidence:    evs,
 		Reclaimable: total - largest,
 	}
 }
 
+// durationSpreadEvidence is durationSpreadEvidenceFor pinned to "stash_id" —
+// kept as its own name since tests reach it directly.
 func durationSpreadEvidence(a, b float64) Evidence {
-	spread := a - b
-	if spread < 0 {
-		spread = -spread
-	}
-	return Evidence{
-		Generator: "stash_id",
-		Kind:      "duration_spread",
-		Value:     &spread,
-		Detail:    fmt.Sprintf("%gs vs %gs", a, b),
-	}
+	return durationSpreadEvidenceFor("stash_id", a, b)
 }

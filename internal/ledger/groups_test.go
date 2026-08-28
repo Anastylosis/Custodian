@@ -235,6 +235,46 @@ func TestStatsGroupFields(t *testing.T) {
 	}
 }
 
+func TestStatsCountsMultifileGroupsByEvidenceKind(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	groups := []Group{
+		{
+			Signature: "scene:9", SceneIDs: []string{"9"}, Verdict: VerdictCertain,
+			Evidence: []Evidence{{Generator: "multifile", Kind: "multifile", Detail: "a; b", Value: float64Ptr(2)}},
+		},
+		{Signature: "hash1+hash2", SceneIDs: []string{"1", "2"}, Verdict: VerdictCertain,
+			Evidence: []Evidence{{Generator: "stash_id", Kind: "shared_stash_id"}}},
+	}
+	if err := l.ReplaceGroups(ctx, runID, groups); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	stats, err := l.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if stats.GroupsMultifile != 1 {
+		t.Errorf("GroupsMultifile = %d, want 1", stats.GroupsMultifile)
+	}
+}
+
+func TestStatsFailsWhenCandidateEvidenceTableIsMissingForMultifileCount(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_evidence`); err != nil {
+		t.Fatalf("dropping candidate_evidence: %v", err)
+	}
+	if _, err := l.Stats(ctx); err == nil {
+		t.Error("Stats should fail when candidate_evidence is missing")
+	}
+}
+
 func TestStatsGroupsIgnoresGoneGroups(t *testing.T) {
 	ctx := context.Background()
 	l := newTestLedger(t)
@@ -339,11 +379,193 @@ func TestPrimaryFiles(t *testing.T) {
 	if len(files) != 2 {
 		t.Fatalf("PrimaryFiles = %d entries, want 2", len(files))
 	}
-	if files["1"].Basename != "a.mp4" || files["1"].Size != 100 {
+	if files["1"].Basename != "a.mp4" || files["1"].Size != 100 || files["1"].Oshash != "hash1" {
 		t.Errorf("PrimaryFiles[1] = %+v", files["1"])
 	}
-	if files["2"].Basename != "b.mp4" || files["2"].Size != 50 {
+	if files["2"].Basename != "b.mp4" || files["2"].Size != 50 || files["2"].Oshash != "" {
 		t.Errorf("PrimaryFiles[2] = %+v", files["2"])
+	}
+}
+
+func TestSceneStashIDs(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "full", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.UpsertScenes(ctx, runID, twoScenes()); err != nil {
+		t.Fatalf("UpsertScenes: %v", err)
+	}
+
+	got, err := l.SceneStashIDs(ctx, []string{"1", "2", "no-such-scene"})
+	if err != nil {
+		t.Fatalf("SceneStashIDs: %v", err)
+	}
+	if len(got["1"]) != 1 || got["1"][0].Endpoint != "https://sb" || got["1"][0].StashID != "uuid-1" {
+		t.Errorf("SceneStashIDs[1] = %+v", got["1"])
+	}
+	if len(got["2"]) != 0 {
+		t.Errorf("SceneStashIDs[2] = %+v, want none (scene 2 carries no stash_id)", got["2"])
+	}
+}
+
+func TestSceneStashIDsFailsWhenTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE scene_stash_id`); err != nil {
+		t.Fatalf("dropping scene_stash_id: %v", err)
+	}
+	if _, err := l.SceneStashIDs(ctx, []string{"1"}); err == nil {
+		t.Error("SceneStashIDs should fail when scene_stash_id is missing")
+	}
+}
+
+func TestSceneStashIDsEmptyInput(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	got, err := l.SceneStashIDs(ctx, nil)
+	if err != nil {
+		t.Fatalf("SceneStashIDs: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("SceneStashIDs(nil) = %v, want empty", got)
+	}
+}
+
+func TestExistingSignatures(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	before, err := l.ExistingSignatures(ctx)
+	if err != nil {
+		t.Fatalf("ExistingSignatures (empty ledger): %v", err)
+	}
+	if len(before) != 0 {
+		t.Errorf("ExistingSignatures on an empty ledger = %v, want empty", before)
+	}
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	after, err := l.ExistingSignatures(ctx)
+	if err != nil {
+		t.Fatalf("ExistingSignatures: %v", err)
+	}
+	if !after["hash1+hash2"] || !after["hash3+hash4+hash5"] {
+		t.Errorf("ExistingSignatures = %v, want both sample signatures", after)
+	}
+}
+
+func TestExistingSignaturesFailsWhenTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_group`); err != nil {
+		t.Fatalf("dropping candidate_group: %v", err)
+	}
+	if _, err := l.ExistingSignatures(ctx); err == nil {
+		t.Error("ExistingSignatures should fail when candidate_group is missing")
+	}
+}
+
+func TestExistingSignaturesIncludesGoneGroups(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	run1, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun 1: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, run1, sampleGroups()); err != nil {
+		t.Fatalf("ReplaceGroups 1: %v", err)
+	}
+	run2, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun 2: %v", err)
+	}
+	// The second group's signature vanishes from this run's live set, but
+	// ExistingSignatures should still report it — a generator finding it
+	// again later is "known", not "new".
+	if err := l.ReplaceGroups(ctx, run2, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups 2: %v", err)
+	}
+
+	got, err := l.ExistingSignatures(ctx)
+	if err != nil {
+		t.Fatalf("ExistingSignatures: %v", err)
+	}
+	if !got["hash3+hash4+hash5"] {
+		t.Error("ExistingSignatures should still report a gone group's signature")
+	}
+}
+
+func TestReplaceGroupsPersistsGeneratorSuppliedSteps(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	g := Group{
+		Signature: "scene:9", SceneIDs: []string{"9"}, Verdict: VerdictCertain,
+		Steps: []Step{{Rule: "file_choice", Outcome: "filed", Detail: "f1"}},
+	}
+	if err := l.ReplaceGroups(ctx, runID, []Group{g}); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	got, err := l.Groups(ctx, GroupFilter{})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Groups = %d, want 1", len(got))
+	}
+	if !reflect.DeepEqual(got[0].Steps, g.Steps) {
+		t.Errorf("Steps = %+v, want %+v", got[0].Steps, g.Steps)
+	}
+}
+
+func TestReplaceGroupsLeavesStepsAloneWhenAGroupCarriesNone(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+	if err := l.SetChoice(ctx, "hash1+hash2", "1", []string{"2"},
+		[]Step{{Rule: "tier", Outcome: "1 wins"}}); err != nil {
+		t.Fatalf("SetChoice: %v", err)
+	}
+
+	// A second scan run for the same signature that supplies no Steps
+	// (the ordinary case — plan, not the generator, owns Steps) must not
+	// wipe out what SetChoice wrote.
+	run2, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun 2: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, run2, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups 2: %v", err)
+	}
+
+	got, err := l.Groups(ctx, GroupFilter{})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	if len(got[0].Steps) != 1 || got[0].Steps[0].Rule != "tier" {
+		t.Errorf("Steps = %+v, want the tier step from SetChoice preserved", got[0].Steps)
 	}
 }
 

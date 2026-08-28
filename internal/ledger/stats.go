@@ -23,10 +23,15 @@ type Stats struct {
 	GroupsMistag            int
 	GroupsQuarantined       int
 	GroupsReclaimed         int
+	GroupsProbable          int
+	GroupsRejected          int
+	GroupsMultifile         int
 	ReclaimableBytes        int64
 	PartialBytes            int64
 	QuarantinedBytes        int64
 	ReclaimedBytes          int64
+	ProbableBytes           int64
+	RejectedBytes           int64
 	LastSync                *Run // most recent full/incremental run
 	LastScan                *Run // most recent scan run
 }
@@ -75,6 +80,12 @@ func (l *Ledger) Stats(ctx context.Context) (Stats, error) {
 
 	if err := l.statsGroups(ctx, &st); err != nil {
 		return Stats{}, err
+	}
+	if err := l.db.QueryRowContext(ctx,
+		`SELECT COUNT(DISTINCT ce.signature) FROM candidate_evidence ce
+		 JOIN candidate_group g ON g.signature = ce.signature AND g.gone_run IS NULL
+		 WHERE ce.kind = 'multifile'`).Scan(&st.GroupsMultifile); err != nil {
+		return Stats{}, fmt.Errorf("ledger: counting multifile candidate_groups: %w", err)
 	}
 
 	lastSync, err := l.LastRunOfKind(ctx, "full", "incremental")
@@ -139,6 +150,15 @@ func (l *Ledger) statsGroups(ctx context.Context, st *Stats) error {
 		case VerdictReclaimed:
 			st.GroupsReclaimed = count
 			st.ReclaimedBytes = reclaimable
+		case VerdictProbable:
+			// Review-only for now (REBUILD.md §4.2): `plan` never chooses a
+			// keeper for a probable group, so its bytes are not reclaimable.
+			st.GroupsProbable = count
+			st.ProbableBytes = reclaimable
+		case VerdictRejected:
+			// A candidate stash-box mis-tag, not a duplicate to reclaim.
+			st.GroupsRejected = count
+			st.RejectedBytes = reclaimable
 		}
 	}
 	return rows.Err()

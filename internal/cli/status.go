@@ -60,11 +60,15 @@ func formatStats(stats ledger.Stats) string {
 	s += fmt.Sprintf("without stash_id:  %d\n", stats.ScenesWithoutStashID)
 	s += fmt.Sprintf("files no phash:    %d\n", stats.FilesWithoutPhash)
 	s += fmt.Sprintf("bytes on disk:     %s\n", confirm.HumanBytes(stats.BytesLive))
-	s += fmt.Sprintf("duplicate groups:  %d (certain %d, conflicted %d, dismissed %d, partial %d, mistag %d)\n",
-		stats.GroupsCertain+stats.GroupsConflicted+stats.GroupsDismissed+stats.GroupsPartial+stats.GroupsMistag,
-		stats.GroupsCertain, stats.GroupsConflicted, stats.GroupsDismissed, stats.GroupsPartial, stats.GroupsMistag)
+	s += fmt.Sprintf("duplicate groups:  %d (certain %d, conflicted %d, dismissed %d, partial %d, mistag %d, probable %d, rejected %d)\n",
+		stats.GroupsCertain+stats.GroupsConflicted+stats.GroupsDismissed+stats.GroupsPartial+stats.GroupsMistag+stats.GroupsProbable+stats.GroupsRejected,
+		stats.GroupsCertain, stats.GroupsConflicted, stats.GroupsDismissed, stats.GroupsPartial, stats.GroupsMistag,
+		stats.GroupsProbable, stats.GroupsRejected)
 	s += fmt.Sprintf("partial:           %d (%s)\n", stats.GroupsPartial, confirm.HumanBytes(stats.PartialBytes))
 	s += fmt.Sprintf("mistag:            %d\n", stats.GroupsMistag)
+	s += fmt.Sprintf("probable:          %d (%s) — review only\n", stats.GroupsProbable, confirm.HumanBytes(stats.ProbableBytes))
+	s += fmt.Sprintf("rejected:          %d (%s)\n", stats.GroupsRejected, confirm.HumanBytes(stats.RejectedBytes))
+	s += fmt.Sprintf("multifile:         %d scenes\n", stats.GroupsMultifile)
 	s += fmt.Sprintf("reclaimable:       %s\n", confirm.HumanBytes(stats.ReclaimableBytes))
 	s += fmt.Sprintf("quarantined:       %d groups (%s)\n",
 		stats.GroupsQuarantined, confirm.HumanBytes(stats.QuarantinedBytes))
