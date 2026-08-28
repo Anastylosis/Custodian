@@ -61,6 +61,11 @@ func DefaultConfigInitPath() string {
 	return "config.yaml"
 }
 
+// DataHome exports dataHome for other internal packages (internal/reclaim's
+// backup directory) that need the same platform-appropriate data root
+// without re-deriving it.
+func DataHome() string { return dataHome() }
+
 // dataHome returns the platform-appropriate directory for user data:
 //
 //	Linux/BSD: $XDG_DATA_HOME, else ~/.local/share

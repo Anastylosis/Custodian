@@ -1,23 +1,25 @@
 package organize
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/Anastylosis/Custodian/internal/config"
 )
 
 func TestFiledUnderBaseDir(t *testing.T) {
-	cfg := &config.OrganizeConfig{BaseDir: filepath.FromSlash("/data")}
+	// Stash paths are always "/"-separated, so these are plain literals —
+	// filepath.FromSlash would turn them into "\"-paths on Windows and mask
+	// a regression in Filed.
+	cfg := &config.OrganizeConfig{BaseDir: "/data"}
 	cases := []struct {
 		path string
 		want bool
 	}{
-		{filepath.FromSlash("/data/Some Performer/2024-01-01_x_1080p.mp4"), true},
-		{filepath.FromSlash("/data"), true},
-		{filepath.FromSlash("/data/"), true},
-		{filepath.FromSlash("/incoming/x.mp4"), false},
-		{filepath.FromSlash("/data-other/x.mp4"), false}, // prefix, not a path component
+		{"/data/Some Performer/2024-01-01_x_1080p.mp4", true},
+		{"/data", true},
+		{"/data/", true},
+		{"/incoming/x.mp4", false},
+		{"/data-other/x.mp4", false}, // prefix, not a path component
 		{"", false},
 	}
 	for _, c := range cases {

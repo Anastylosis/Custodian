@@ -45,6 +45,7 @@ func pubKey(t *testing.T, privPath string) ssh.PublicKey {
 func TestExpandHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	tests := []struct{ in, want string }{
 		{"", ""},
@@ -72,6 +73,7 @@ func TestExpandHome_NoHomeDirReturnsInputUnchanged(t *testing.T) {
 func TestAuthMethods_NoCredentialsErrors(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	if _, err := authMethods(SSHConfig{}); err == nil {
@@ -82,6 +84,7 @@ func TestAuthMethods_NoCredentialsErrors(t *testing.T) {
 func TestAuthMethods_ExplicitKeyFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 	key := genKey(t, home, "id_ed25519", "")
 
@@ -97,6 +100,7 @@ func TestAuthMethods_ExplicitKeyFile(t *testing.T) {
 func TestAuthMethods_ExplicitKeyFileWithTilde(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 	genKey(t, home, "id_ed25519", "")
 
@@ -112,6 +116,7 @@ func TestAuthMethods_ExplicitKeyFileWithTilde(t *testing.T) {
 func TestAuthMethods_ExplicitKeyFileMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	if _, err := authMethods(SSHConfig{KeyFile: filepath.Join(home, "absent")}); err == nil {
@@ -122,6 +127,7 @@ func TestAuthMethods_ExplicitKeyFileMissing(t *testing.T) {
 func TestAuthMethods_ExplicitKeyFileWrongPassphrase(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 	key := genKey(t, home, "id_ed25519", "correct-horse")
 
@@ -133,6 +139,7 @@ func TestAuthMethods_ExplicitKeyFileWrongPassphrase(t *testing.T) {
 func TestAuthMethods_ExplicitKeyFileCorrectPassphrase(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 	key := genKey(t, home, "id_ed25519", "correct-horse")
 
@@ -148,6 +155,7 @@ func TestAuthMethods_ExplicitKeyFileCorrectPassphrase(t *testing.T) {
 func TestAuthMethods_ExplicitKeyFileNotAKey(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 	bogus := filepath.Join(home, "bogus")
 	if err := os.WriteFile(bogus, []byte("not a key"), 0o600); err != nil {
@@ -162,6 +170,7 @@ func TestAuthMethods_ExplicitKeyFileNotAKey(t *testing.T) {
 func TestAuthMethods_DefaultKeyLocations(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 	if err := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); err != nil {
 		t.Fatal(err)
@@ -180,6 +189,7 @@ func TestAuthMethods_DefaultKeyLocations(t *testing.T) {
 func TestAuthMethods_Password(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	methods, err := authMethods(SSHConfig{Password: "hunter2"})
@@ -194,6 +204,7 @@ func TestAuthMethods_Password(t *testing.T) {
 func TestAuthMethods_SSHAgentSocket(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	sock := filepath.Join(t.TempDir(), "agent.sock")
 	ln, err := net.Listen("unix", sock)
@@ -224,6 +235,7 @@ func TestAuthMethods_SSHAgentSocket(t *testing.T) {
 func TestAuthMethods_DefaultKeyLocationsSkipsUnusableKeysButUsesPassphrase(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 	sshDir := filepath.Join(home, ".ssh")
 	if err := os.Mkdir(sshDir, 0o700); err != nil {
@@ -328,6 +340,7 @@ func TestHostKeyCallback_MissingFileWithAcceptNewCreatesIt(t *testing.T) {
 func TestHostKeyCallback_DefaultsToHomeSSHDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	if err := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -444,6 +457,7 @@ func TestNewSSH_RequiresHostAndUser(t *testing.T) {
 func TestNewSSH_PropagatesAuthMethodsFailure(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	_, err := NewSSH(context.Background(), SSHConfig{Host: "example.com", User: "me"})
@@ -455,6 +469,7 @@ func TestNewSSH_PropagatesAuthMethodsFailure(t *testing.T) {
 func TestNewSSH_PropagatesHostKeyCallbackFailure(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 	key := genKey(t, home, "id_ed25519", "")
 

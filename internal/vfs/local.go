@@ -15,6 +15,12 @@ import (
 // and on Windows with a mapped drive or UNC path.
 type Local struct{}
 
+// errNotADirectory reports a path component that exists but is not a
+// directory — POSIX's ENOTDIR, made explicit rather than OS-dependent
+// (Windows has no ENOTDIR; the underlying error there can be indistinguishable
+// from "not found").
+var errNotADirectory = errors.New("vfs: not a directory")
+
 // NewLocal returns a filesystem-backed FS.
 func NewLocal() *Local { return &Local{} }
 
@@ -24,6 +30,14 @@ func (l *Local) Close() error     { return nil }
 func (l *Local) ReadDir(ctx context.Context, dir string) ([]Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	// Checked up front so "dir is a regular file" reads the same on every
+	// OS: POSIX's os.ReadDir fails that case with ENOTDIR (not ErrNotExist,
+	// so it already falls through to the error below), but Windows has no
+	// ENOTDIR — the failure there can come back classified as ErrNotExist
+	// and get swallowed as "nothing here" by the check that follows.
+	if fi, err := os.Stat(dir); err == nil && !fi.IsDir() {
+		return nil, fmt.Errorf("list %q: %w", dir, errNotADirectory)
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -57,6 +71,14 @@ func (l *Local) Open(ctx context.Context, p string) (io.ReadCloser, error) {
 func (l *Local) Exists(ctx context.Context, path string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
+	}
+	// Checked up front for the same reason ReadDir checks it: POSIX reports
+	// a non-directory parent as ENOTDIR, which is not ErrNotExist and so
+	// already surfaces as an error below. Windows has no ENOTDIR — that
+	// failure can come back classified as ErrNotExist there and get
+	// swallowed as "absent" instead.
+	if fi, err := os.Stat(filepath.Dir(path)); err == nil && !fi.IsDir() {
+		return false, fmt.Errorf("stat %q: %w", path, errNotADirectory)
 	}
 	_, err := os.Lstat(path)
 	if err == nil {

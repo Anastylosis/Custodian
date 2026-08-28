@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"path"
 
 	"github.com/Anastylosis/Custodian/internal/config"
 	"github.com/Anastylosis/Custodian/internal/ledger"
@@ -101,10 +101,10 @@ func Scan(ctx context.Context, l *ledger.Ledger, cfg *config.Config, opts ScanOp
 		case target == fs.Path:
 			e.Status, e.TargetPath = "already_correct", target
 			res.AlreadyCorrect++
-		case filepath.Dir(target) == filepath.Dir(fs.Path) && orgCfg.RenameInPlace:
+		case path.Dir(target) == path.Dir(fs.Path) && orgCfg.RenameInPlace:
 			e.Status, e.TargetPath = "rename", target
 			res.Renames++
-		case filepath.Dir(target) == filepath.Dir(fs.Path):
+		case path.Dir(target) == path.Dir(fs.Path):
 			e.Status, e.TargetPath, e.Reason = "already_correct", fs.Path, "in correct folder; rename_in_place is off"
 			res.AlreadyCorrect++
 		default:

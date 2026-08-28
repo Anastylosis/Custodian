@@ -75,7 +75,10 @@ func TestScanMove(t *testing.T) {
 		t.Fatalf("res = %+v", res)
 	}
 	e := res.Entries[0]
-	want := filepath.FromSlash("/data/P1/2024-01-01_P1-T1_1080p.mp4")
+	// Stash paths are always "/"-separated, regardless of the OS running
+	// the test — filepath.FromSlash would turn this into a "\"-path on
+	// Windows and mask a regression.
+	want := "/data/P1/2024-01-01_P1-T1_1080p.mp4"
 	if e.Status != "move" || e.TargetPath != want {
 		t.Errorf("entry = %+v, want move to %s", e, want)
 	}
@@ -83,8 +86,8 @@ func TestScanMove(t *testing.T) {
 
 func TestScanRename(t *testing.T) {
 	l := newTestLedger(t)
-	target := filepath.FromSlash("/data/P2/2024-02-02_P2-T2_720p.mp4")
-	current := filepath.FromSlash("/data/P2/wrong-name.mp4")
+	target := "/data/P2/2024-02-02_P2-T2_720p.mp4"
+	current := "/data/P2/wrong-name.mp4"
 	seedScan(t, l, []stash.Scene{
 		{
 			ID: "2", Title: "T2", Date: "2024-02-02", Performers: performers("P2"),
@@ -107,7 +110,7 @@ func TestScanRename(t *testing.T) {
 
 func TestScanAlreadyCorrect(t *testing.T) {
 	l := newTestLedger(t)
-	path := filepath.FromSlash("/data/P3/2024-03-03_P3-T3_1080p.mp4")
+	path := "/data/P3/2024-03-03_P3-T3_1080p.mp4"
 	seedScan(t, l, []stash.Scene{
 		{
 			ID: "3", Title: "T3", Date: "2024-03-03", Performers: performers("P3"),
@@ -177,7 +180,7 @@ func TestScanConflictBetweenTwoPlannedMoves(t *testing.T) {
 
 func TestScanConflictWithExistingFileOnDisk(t *testing.T) {
 	l := newTestLedger(t)
-	occupied := filepath.FromSlash("/data/P6/2024-06-06_P6-T6_1080p.mp4")
+	occupied := "/data/P6/2024-06-06_P6-T6_1080p.mp4"
 	seedScan(t, l, []stash.Scene{
 		{
 			ID: "occupant", Title: "T6", Date: "2024-06-06", Performers: performers("P6"),

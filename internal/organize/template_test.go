@@ -1,7 +1,6 @@
 package organize
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,7 +33,7 @@ func TestComputeTargetPathSinglePerformer(t *testing.T) {
 	if reason != "" {
 		t.Fatalf("unexpected skip: %s", reason)
 	}
-	want := filepath.FromSlash("/data/Some Performer/2024-12-15_Some.Performer-A.Long.Scene.Title.With.Words_1080p.mp4")
+	want := "/data/Some Performer/2024-12-15_Some.Performer-A.Long.Scene.Title.With.Words_1080p.mp4"
 	if target != want {
 		t.Errorf("got:  %s\nwant: %s", target, want)
 	}
@@ -48,7 +47,7 @@ func TestComputeTargetPathTwoPerformers(t *testing.T) {
 	file := &stash.File{Basename: "x.mp4", Height: 720}
 	target, _ := ComputeTargetPath(scene, file, defaultCfg())
 	// Both performers in filename, alphabetical, underscore-joined, dots for spaces.
-	want := filepath.FromSlash("/data/AIKA/2016-07-19_AIKA_Alice.Otsu-PPPD-488_720p.mp4")
+	want := "/data/AIKA/2016-07-19_AIKA_Alice.Otsu-PPPD-488_720p.mp4"
 	if target != want {
 		t.Errorf("got:  %s\nwant: %s", target, want)
 	}
@@ -62,7 +61,7 @@ func TestComputeTargetPathThreePerformers(t *testing.T) {
 	file := &stash.File{Basename: "x.mp4", Height: 1080}
 	target, _ := ComputeTargetPath(scene, file, defaultCfg())
 	// 3 performers = still included (max is 3).
-	want := filepath.FromSlash("/data/Alice/2024-01-01_Alice_Bob.Smith_Charlie-Title_1080p.mp4")
+	want := "/data/Alice/2024-01-01_Alice_Bob.Smith_Charlie-Title_1080p.mp4"
 	if target != want {
 		t.Errorf("got:  %s\nwant: %s", target, want)
 	}
@@ -76,7 +75,7 @@ func TestComputeTargetPathFourPerformersOmitted(t *testing.T) {
 	file := &stash.File{Basename: "x.mp4", Height: 1080}
 	target, _ := ComputeTargetPath(scene, file, defaultCfg())
 	// >3 performers: {performers} is empty, so filename starts with date_-title
-	want := filepath.FromSlash("/data/A/2024-01-01_-Group.Scene_1080p.mp4")
+	want := "/data/A/2024-01-01_-Group.Scene_1080p.mp4"
 	if target != want {
 		t.Errorf("got:  %s\nwant: %s", target, want)
 	}
@@ -89,7 +88,7 @@ func TestComputeTargetPath4K(t *testing.T) {
 	}
 	file := &stash.File{Basename: "x.mp4", Height: 2160}
 	target, _ := ComputeTargetPath(scene, file, defaultCfg())
-	want := filepath.FromSlash("/data/Angel The Dreamgirl/2022-08-24_Angel.The.Dreamgirl-Some.Title_4k.mp4")
+	want := "/data/Angel The Dreamgirl/2022-08-24_Angel.The.Dreamgirl-Some.Title_4k.mp4"
 	if target != want {
 		t.Errorf("got:  %s\nwant: %s", target, want)
 	}
@@ -106,7 +105,7 @@ func TestComputeTargetPathMultiPerformerAlphabetical(t *testing.T) {
 	file := &stash.File{Basename: "x.mp4", Height: 1080}
 	target, _ := ComputeTargetPath(scene, file, defaultCfg())
 	// Folder = first alphabetical performer.
-	if !strings.Contains(target, filepath.FromSlash("Some Performer/")) {
+	if !strings.Contains(target, "Some Performer/") {
 		t.Errorf("expected folder to be Some Performer, got: %s", target)
 	}
 	// Filename = both performers, alphabetical.
@@ -161,7 +160,7 @@ func TestComputeTargetPathStudioTemplate(t *testing.T) {
 	}
 	file := &stash.File{Basename: "x.mp4", Height: 1080}
 	target, _ := ComputeTargetPath(scene, file, cfg)
-	want := filepath.FromSlash("/data/On A Dogging Mission/2016-10-14 - Blonde MILF Dogging/2016-10-14_Gemma.Gold-Blonde.MILF.Dogging_1080p.mp4")
+	want := "/data/On A Dogging Mission/2016-10-14 - Blonde MILF Dogging/2016-10-14_Gemma.Gold-Blonde.MILF.Dogging_1080p.mp4"
 	if target != want {
 		t.Errorf("got:  %s\nwant: %s", target, want)
 	}
@@ -228,7 +227,7 @@ func TestComputeTargetPathBackslashInPerformer(t *testing.T) {
 	// directory boundary. Asserting the whole path keeps that OS-independent:
 	// on Windows a surviving backslash would split the performer into two
 	// components instead.
-	want := filepath.FromSlash("/data/Performer-Name/2024-01-01_Performer-Name-Title_1080p.mp4")
+	want := "/data/Performer-Name/2024-01-01_Performer-Name-Title_1080p.mp4"
 	if target != want {
 		t.Errorf("got:  %s\nwant: %s", target, want)
 	}

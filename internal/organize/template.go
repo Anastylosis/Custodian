@@ -3,7 +3,7 @@
 package organize
 
 import (
-	"path/filepath"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -35,7 +35,9 @@ func ComputeTargetPath(scene *stash.Scene, file *stash.File, cfg *config.Organiz
 		return "", "template rendered to empty string"
 	}
 
-	fullPath := filepath.Join(cfg.BaseDir, rendered)
+	// BaseDir and rendered are Stash paths, always forward-slash — join with
+	// "path", not "path/filepath", which would use "\" on Windows.
+	fullPath := path.Join(cfg.BaseDir, rendered)
 
 	// Enforce path length limit to avoid filesystem errors.
 	fullPath = truncatePath(fullPath, scene.ID)
@@ -70,7 +72,7 @@ func extractVars(scene *stash.Scene, file *stash.File, cfg *config.OrganizeConfi
 
 	if file != nil {
 		vars["resolution"] = heightToToken(file.Height)
-		ext := strings.TrimPrefix(filepath.Ext(file.Basename), ".")
+		ext := strings.TrimPrefix(path.Ext(file.Basename), ".")
 		if ext == "" {
 			ext = "mp4"
 		}
@@ -122,8 +124,10 @@ func joinPerformers(performers []stash.Performer, cfg *config.OrganizeConfig) st
 // renderTemplate substitutes {variables} in the template string. The
 // folder part and filename part get different space-char treatment.
 func renderTemplate(tmpl string, vars map[string]string, cfg *config.OrganizeConfig) string {
-	// Split into directory and filename at the last separator.
-	dir, base := filepath.Split(tmpl)
+	// Split into directory and filename at the last separator. tmpl is a
+	// config-authored template, always "/"-separated (like every other Stash
+	// path), so "path" — never "path/filepath" — does the splitting.
+	dir, base := path.Split(tmpl)
 
 	// Render the filename part (spaces → space_char, typically ".").
 	base = substituteVars(base, vars, cfg.SpaceChar)
@@ -132,7 +136,7 @@ func renderTemplate(tmpl string, vars map[string]string, cfg *config.OrganizeCon
 	dir = substituteVars(dir, vars, cfg.FolderSpaceChar)
 
 	// Clean up any double separators or trailing slashes.
-	result := filepath.Join(dir, base)
+	result := path.Join(dir, base)
 	return sanitizePath(result)
 }
 
@@ -187,16 +191,17 @@ func sanitizePath(p string) string {
 	}
 
 	// Strip leading/trailing dots and spaces from each path component
-	// (Windows rejects these).
-	parts := strings.Split(p, string(filepath.Separator))
+	// (Windows rejects these). p is a Stash path, always "/"-separated,
+	// regardless of the OS running this code.
+	parts := strings.Split(p, "/")
 	for i, part := range parts {
 		parts[i] = strings.TrimFunc(part, func(r rune) bool {
 			return r == '.' || r == ' '
 		})
 	}
-	p = strings.Join(parts, string(filepath.Separator))
+	p = strings.Join(parts, "/")
 
-	return filepath.Clean(p)
+	return path.Clean(p)
 }
 
 // sanitizeValue cleans a single template variable value before substitution.
@@ -225,25 +230,25 @@ func truncatePath(fullPath string, sceneID string) string {
 		return fullPath
 	}
 
-	dir := filepath.Dir(fullPath)
-	ext := filepath.Ext(fullPath)
+	dir := path.Dir(fullPath)
+	ext := path.Ext(fullPath)
 	suffix := "_" + sceneID + ext
 
 	// How much room do we have for the base name?
 	available := maxPathLen - len(dir) - 1 - len(suffix) // -1 for separator
 	if available < 10 {
 		// Dir itself is too long; just use scene ID as filename.
-		return filepath.Join(dir, sceneID+ext)
+		return path.Join(dir, sceneID+ext)
 	}
 
-	base := strings.TrimSuffix(filepath.Base(fullPath), ext)
+	base := strings.TrimSuffix(path.Base(fullPath), ext)
 	if len(base) > available {
 		base = base[:available]
 	}
 	// Trim trailing dots/spaces from the truncated base.
 	base = strings.TrimRight(base, ". ")
 
-	return filepath.Join(dir, base+suffix)
+	return path.Join(dir, base+suffix)
 }
 
 // heightToToken maps video height to a filename resolution token.

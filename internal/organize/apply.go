@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
+	"path"
 
 	"github.com/Anastylosis/Custodian/internal/confirm"
 	"github.com/Anastylosis/Custodian/internal/ledger"
@@ -139,8 +139,11 @@ type applier struct {
 }
 
 func (a *applier) one(ctx context.Context, e Entry, report *ApplyReport) {
-	targetDir := filepath.Dir(e.TargetPath)
-	targetBase := filepath.Base(e.TargetPath)
+	// e.TargetPath is a Stash path, always "/"-separated — split it with
+	// "path", not "path/filepath", which would use "\" on Windows and send
+	// moveFiles a folder Stash cannot resolve.
+	targetDir := path.Dir(e.TargetPath)
+	targetBase := path.Base(e.TargetPath)
 
 	// Resolve sidecars first: the source directory is about to change.
 	sideMoves, sideErr := a.mover.Plan(ctx, e.CurrentPath, e.TargetPath)
@@ -188,7 +191,7 @@ func (a *applier) one(ctx context.Context, e Entry, report *ApplyReport) {
 
 func (a *applier) logSidecar(ctx context.Context, from, to string, ok bool, note string) {
 	id, err := a.l.AppendMutation(ctx, ledger.Mutation{
-		RunID: a.runID, Kind: "sidecar", Target: filepath.Base(from), From: from, To: to,
+		RunID: a.runID, Kind: "sidecar", Target: path.Base(from), From: from, To: to,
 	})
 	if err != nil {
 		return

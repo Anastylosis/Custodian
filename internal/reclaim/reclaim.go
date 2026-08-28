@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Anastylosis/Custodian/internal/config"
 	"github.com/Anastylosis/Custodian/internal/ledger"
 	"github.com/Anastylosis/Custodian/internal/pathmap"
 	"github.com/Anastylosis/Custodian/internal/sidecar"
@@ -73,16 +74,17 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// DefaultBackupDir is where verified backups land when nothing configures it.
+// DefaultBackupDir is where verified backups land when nothing configures it:
+// the platform's data root — $XDG_DATA_HOME (any OS), else ~/.local/share on
+// Linux/BSD, else the OS config root (%AppData% on Windows, Application
+// Support on macOS) — plus "custodian/backups". BackupDir is a host path (the
+// backup file lands on the disk running custodian, not in Stash), so it is
+// built with "path/filepath", unlike a Stash path.
 func DefaultBackupDir() string {
-	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
-		return filepath.Join(d, "custodian", "backups")
+	if dir := config.DataHome(); dir != "" {
+		return filepath.Join(dir, "custodian", "backups")
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "backups"
-	}
-	return filepath.Join(home, ".local", "share", "custodian", "backups")
+	return "backups"
 }
 
 // Apply quarantines the losers of every live `certain` or `partial` group

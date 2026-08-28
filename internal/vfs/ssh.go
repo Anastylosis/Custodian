@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -55,6 +56,9 @@ type SSH struct {
 	label  string
 }
 
+// expandHome resolves a leading ~ in a config-supplied key/known_hosts path.
+// The result is a path on this machine's own filesystem, not a Stash path —
+// filepath.Join, not path.Join, so it comes out in the OS's own notation.
 func expandHome(p string) string {
 	if p == "" || !strings.HasPrefix(p, "~") {
 		return p
@@ -63,7 +67,7 @@ func expandHome(p string) string {
 	if err != nil {
 		return p
 	}
-	return path.Join(home, strings.TrimPrefix(p, "~"))
+	return filepath.Join(home, strings.TrimPrefix(p, "~"))
 }
 
 // authMethods assembles the auth attempts in the order a user would expect:
@@ -113,9 +117,11 @@ func authMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
 	}
 
 	if cfg.KeyFile == "" {
+		// Default key locations are on this machine, so filepath — not
+		// path — builds them.
 		if home, err := os.UserHomeDir(); err == nil {
 			for _, name := range []string{"id_ed25519", "id_rsa", "id_ecdsa"} {
-				addKey(path.Join(home, ".ssh", name))
+				addKey(filepath.Join(home, ".ssh", name))
 			}
 		}
 	}
@@ -145,7 +151,8 @@ func hostKeyCallback(cfg SSHConfig) (ssh.HostKeyCallback, error) {
 		if err != nil {
 			return nil, fmt.Errorf("locate known_hosts: %w", err)
 		}
-		khPath = path.Join(home, ".ssh", "known_hosts")
+		// known_hosts lives on this machine, so filepath — not path.
+		khPath = filepath.Join(home, ".ssh", "known_hosts")
 	}
 
 	if _, err := os.Stat(khPath); errors.Is(err, os.ErrNotExist) {

@@ -40,7 +40,10 @@ func TestLocalDirCandidate(t *testing.T) {
 
 func TestLocalDirCandidate_ExpandsTilde(t *testing.T) {
 	home := t.TempDir()
+	// os.UserHomeDir reads USERPROFILE on Windows, not HOME — both must be
+	// set for the tilde expansion to land in the temp home on every OS.
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	sub := filepath.Join(home, "Videos")
 	if err := os.Mkdir(sub, 0o755); err != nil {
 		t.Fatal(err)

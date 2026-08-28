@@ -2,6 +2,8 @@ package reclaim
 
 import (
 	"context"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -456,13 +458,28 @@ func TestApplyRejectsMissingDependencies(t *testing.T) {
 }
 
 func TestDefaultBackupDirIsUnderTheDataHome(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/tmp/data")
-	if got := DefaultBackupDir(); got != "/tmp/data/custodian/backups" {
-		t.Errorf("DefaultBackupDir() = %q", got)
+	// BackupDir is a host path, so the expected values are built with
+	// filepath.Join too — comparing against a literal "/"-joined string
+	// would fail on Windows even when DefaultBackupDir is correct.
+	t.Setenv("XDG_DATA_HOME", filepath.FromSlash("/tmp/data"))
+	want := filepath.Join(filepath.FromSlash("/tmp/data"), "custodian", "backups")
+	if got := DefaultBackupDir(); got != want {
+		t.Errorf("DefaultBackupDir() = %q, want %q", got, want)
 	}
+
 	t.Setenv("XDG_DATA_HOME", "")
-	if got := DefaultBackupDir(); !strings.HasSuffix(got, "/.local/share/custodian/backups") {
-		t.Errorf("DefaultBackupDir() = %q", got)
+	got := DefaultBackupDir()
+	switch runtime.GOOS {
+	case "windows", "darwin":
+		// No separate data root: falls back to the OS config root
+		// (%AppData% on Windows, Application Support on macOS).
+		if !strings.HasSuffix(got, filepath.Join("custodian", "backups")) {
+			t.Errorf("DefaultBackupDir() = %q", got)
+		}
+	default:
+		if !strings.HasSuffix(got, filepath.Join(".local", "share", "custodian", "backups")) {
+			t.Errorf("DefaultBackupDir() = %q", got)
+		}
 	}
 }
 
