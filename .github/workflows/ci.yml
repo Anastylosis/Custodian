@@ -56,8 +56,10 @@ jobs:
       # and still report green.
       seeded-env-var: SFX_INT_STASH_SEEDED
       # No build tag on these tests, so the harness default
-      # (`-tags=integration ./...`) would run nothing.
-      test-command: go test -count=1 ./internal/stash/...
+      # (`-tags=integration ./...`) would run nothing. mirror and evidence
+      # carry the same env-gated pattern as internal/stash, so they widen the
+      # same command rather than getting a second job.
+      test-command: go test -count=1 ./internal/stash/... ./internal/mirror/... ./internal/evidence/...
 
 # What Custodian gains by adopting: gotestsum + JUnit + Codecov upload, the
 # coverage step summary, and a cross-build matrix — none of which its hand-
@@ -67,9 +69,9 @@ jobs:
 # Custodian has no Dockerfile, so check-dockerfile-go-version stays off and
 # there is no docker workflow to adopt.
 #
-# Its internal/stash/integration_test.go carries no build tag: it is gated on
-# SFX_INT_STASH_URL at runtime instead, so `go test ./...` in the `ci` job
-# skips every one of those tests and stays hermetic. The stash-integration job
-# is what supplies that variable — along with SFX_INT_STASH_SEEDED, which
-# turns the skips into assertions. vet-integration-tag stays off; there is no
-# tag for it to check.
+# Its internal/{stash,mirror,evidence}/integration_test.go files carry no
+# build tag: each is gated on SFX_INT_STASH_URL at runtime instead, so
+# `go test ./...` in the `ci` job skips every one of those tests and stays
+# hermetic. The stash-integration job is what supplies that variable — along
+# with SFX_INT_STASH_SEEDED, which turns the skips into assertions.
+# vet-integration-tag stays off; there is no tag for it to check.
