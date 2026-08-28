@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -921,5 +922,456 @@ func TestOpenMigratesAnExistingV2Ledger(t *testing.T) {
 	}
 	if version != currentSchemaVersion {
 		t.Errorf("schema_version = %d, want %d", version, currentSchemaVersion)
+	}
+}
+
+// schemaV3SQL is phase 3a's schema.sql, frozen here so
+// TestOpenMigratesAnExistingV3Ledger can build a database in the shape a
+// pre-mutation-outcome ledger would actually be in — candidate_group has
+// keeper but no applied_run, and mutation_log has no ok column — then
+// verify Open migrates it forward to v4.
+const schemaV3SQL = `
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS schema_version (
+  version INTEGER PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS scene (
+  id          TEXT PRIMARY KEY,
+  title       TEXT NOT NULL DEFAULT '',
+  code        TEXT NOT NULL DEFAULT '',
+  date        TEXT NOT NULL DEFAULT '',
+  studio_id   TEXT NOT NULL DEFAULT '',
+  studio_name TEXT NOT NULL DEFAULT '',
+  organized   INTEGER NOT NULL DEFAULT 0,
+  rating100   INTEGER,
+  play_count  INTEGER NOT NULL DEFAULT 0,
+  updated_at  TEXT NOT NULL DEFAULT '',
+  seen_run    INTEGER NOT NULL,
+  gone_run    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS file (
+  id          TEXT PRIMARY KEY,
+  scene_id    TEXT NOT NULL REFERENCES scene(id) ON DELETE CASCADE,
+  path        TEXT NOT NULL DEFAULT '',
+  basename    TEXT NOT NULL DEFAULT '',
+  size        INTEGER NOT NULL DEFAULT 0,
+  mod_time    TEXT NOT NULL DEFAULT '',
+  width       INTEGER NOT NULL DEFAULT 0,
+  height      INTEGER NOT NULL DEFAULT 0,
+  duration    REAL NOT NULL DEFAULT 0,
+  video_codec TEXT NOT NULL DEFAULT '',
+  audio_codec TEXT NOT NULL DEFAULT '',
+  frame_rate  REAL NOT NULL DEFAULT 0,
+  bit_rate    INTEGER NOT NULL DEFAULT 0,
+  is_primary  INTEGER NOT NULL DEFAULT 0,
+  oshash      TEXT,
+  md5         TEXT,
+  phash       TEXT,
+  seen_run    INTEGER NOT NULL,
+  gone_run    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS run (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at    TEXT NOT NULL,
+  finished_at   TEXT,
+  kind          TEXT NOT NULL,
+  since         TEXT,
+  scenes_seen   INTEGER NOT NULL DEFAULT 0,
+  files_seen    INTEGER NOT NULL DEFAULT 0,
+  scenes_gone   INTEGER NOT NULL DEFAULT 0,
+  stash_version TEXT NOT NULL DEFAULT '',
+  notes         TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS decision (
+  key        TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  keeper     TEXT,
+  decided_at TEXT NOT NULL,
+  notes      TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS mutation_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id     INTEGER,
+  at         TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  target     TEXT NOT NULL,
+  from_value TEXT NOT NULL DEFAULT '',
+  to_value   TEXT NOT NULL DEFAULT '',
+  note       TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS candidate_group (
+  signature   TEXT PRIMARY KEY,
+  verdict     TEXT NOT NULL,
+  reason      TEXT NOT NULL DEFAULT '',
+  reclaimable INTEGER NOT NULL DEFAULT 0,
+  keeper      TEXT,
+  seen_run    INTEGER NOT NULL,
+  gone_run    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS candidate_scene (
+  signature TEXT NOT NULL REFERENCES candidate_group(signature) ON DELETE CASCADE,
+  scene_id  TEXT NOT NULL,
+  PRIMARY KEY(signature, scene_id)
+);
+
+CREATE TABLE IF NOT EXISTS candidate_evidence (
+  signature TEXT NOT NULL REFERENCES candidate_group(signature) ON DELETE CASCADE,
+  generator TEXT NOT NULL,
+  kind      TEXT NOT NULL,
+  detail    TEXT NOT NULL DEFAULT '',
+  value     REAL
+);
+
+CREATE TABLE IF NOT EXISTS candidate_step (
+  signature TEXT NOT NULL REFERENCES candidate_group(signature) ON DELETE CASCADE,
+  ord       INTEGER NOT NULL,
+  rule      TEXT NOT NULL,
+  outcome   TEXT NOT NULL,
+  detail    TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(signature, ord)
+);
+
+INSERT INTO schema_version(version) VALUES(3);
+INSERT INTO candidate_group(signature, verdict, reason, reclaimable, keeper, seen_run, gone_run)
+  VALUES('hash1+hash2', 'certain', 'durations agree', 100, NULL, 1, NULL);
+`
+
+func TestOpenMigratesAnExistingV3Ledger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v3.ledger.sqlite")
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("opening raw sqlite: %v", err)
+	}
+	if _, err := raw.Exec(schemaV3SQL); err != nil {
+		t.Fatalf("applying v3 schema: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("closing raw sqlite: %v", err)
+	}
+
+	l, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open (migrating v3): %v", err)
+	}
+	defer func() { _ = l.Close() }()
+
+	for _, col := range []struct {
+		table, column string
+	}{
+		{"candidate_group", "applied_run"},
+		{"mutation_log", "ok"},
+	} {
+		found := false
+		rows, err := l.DB().Query(fmt.Sprintf(`PRAGMA table_info(%s)`, col.table))
+		if err != nil {
+			t.Fatalf("PRAGMA table_info(%s): %v", col.table, err)
+		}
+		for rows.Next() {
+			var cid int
+			var name, ctype string
+			var notNull, pk int
+			var dflt sql.NullString
+			if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+				t.Fatalf("scanning table_info(%s): %v", col.table, err)
+			}
+			if name == col.column {
+				found = true
+			}
+		}
+		_ = rows.Close()
+		if !found {
+			t.Errorf("%s.%s missing after migration", col.table, col.column)
+		}
+	}
+
+	// The pre-existing group survived the migration untouched.
+	var verdict string
+	if err := l.DB().QueryRow(`SELECT verdict FROM candidate_group WHERE signature = 'hash1+hash2'`).
+		Scan(&verdict); err != nil {
+		t.Fatalf("reading migrated group: %v", err)
+	}
+	if verdict != "certain" {
+		t.Errorf("verdict = %q, want certain", verdict)
+	}
+
+	// SetOutcome works against the migrated schema (writes applied_run).
+	ctx := context.Background()
+	if err := l.SetOutcome(ctx, "hash1+hash2", VerdictQuarantined, 0); err != nil {
+		t.Fatalf("SetOutcome on migrated ledger: %v", err)
+	}
+
+	var version int
+	if err := l.DB().QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
+		t.Fatalf("reading schema_version: %v", err)
+	}
+	if version != currentSchemaVersion {
+		t.Errorf("schema_version = %d, want %d", version, currentSchemaVersion)
+	}
+}
+
+func TestAddColumnIfMissingFailsWhenAlterConflictsWithAnExistingColumn(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	// "Keeper" differs from the existing "keeper" only by case: the
+	// found-check treats them as distinct, but SQLite's ALTER TABLE does
+	// not, so the ADD COLUMN itself fails.
+	if err := l.addColumnIfMissing(ctx, "candidate_group", "Keeper", "TEXT"); err == nil {
+		t.Error("addColumnIfMissing should fail when ALTER TABLE conflicts with an existing column")
+	}
+}
+
+func TestUpsertScenesFailsWhenSceneTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE scene`); err != nil {
+		t.Fatalf("dropping scene: %v", err)
+	}
+
+	runID, err := l.BeginRun(ctx, "full", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.UpsertScenes(ctx, runID, twoScenes()); err == nil {
+		t.Error("UpsertScenes should fail when the scene table is missing")
+	}
+}
+
+func TestUpsertScenesFailsWhenFileTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE file`); err != nil {
+		t.Fatalf("dropping file: %v", err)
+	}
+
+	runID, err := l.BeginRun(ctx, "full", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.UpsertScenes(ctx, runID, twoScenes()); err == nil {
+		t.Error("UpsertScenes should fail when the file table is missing")
+	}
+}
+
+func TestTombstoneUnseenFailsWhenSceneTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "full", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.UpsertScenes(ctx, runID, twoScenes()); err != nil {
+		t.Fatalf("UpsertScenes: %v", err)
+	}
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE scene`); err != nil {
+		t.Fatalf("dropping scene: %v", err)
+	}
+
+	nextRun, err := l.BeginRun(ctx, "full", "")
+	if err != nil {
+		t.Fatalf("BeginRun 2: %v", err)
+	}
+	if _, _, err := l.TombstoneUnseen(ctx, nextRun); err == nil {
+		t.Error("TombstoneUnseen should fail when the scene table is missing")
+	}
+}
+
+func TestStatsFailsWhenCandidateGroupTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_group`); err != nil {
+		t.Fatalf("dropping candidate_group: %v", err)
+	}
+	if _, err := l.Stats(ctx); err == nil {
+		t.Error("Stats should fail when candidate_group is missing")
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func TestAppendMutationStoresOKWhenProvided(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	for _, ok := range []bool{true, false} {
+		if _, err := l.AppendMutation(ctx, Mutation{Kind: "move", Target: "f1", OK: boolPtr(ok)}); err != nil {
+			t.Fatalf("AppendMutation(OK=%v): %v", ok, err)
+		}
+	}
+
+	entries, err := l.Mutations(ctx, 0)
+	if err != nil {
+		t.Fatalf("Mutations: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("Mutations = %d entries, want 2", len(entries))
+	}
+	// Mutations orders newest first: the false one was appended last.
+	if entries[0].OK == nil || *entries[0].OK != false {
+		t.Errorf("entries[0].OK = %v, want false", entries[0].OK)
+	}
+	if entries[1].OK == nil || *entries[1].OK != true {
+		t.Errorf("entries[1].OK = %v, want true", entries[1].OK)
+	}
+}
+
+func TestMutationsOrdersNewestFirstAndRespectsLimit(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	var ids []int64
+	for i := 0; i < 3; i++ {
+		id, err := l.AppendMutation(ctx, Mutation{Kind: "move", Target: fmt.Sprintf("f%d", i)})
+		if err != nil {
+			t.Fatalf("AppendMutation %d: %v", i, err)
+		}
+		ids = append(ids, id)
+	}
+
+	all, err := l.Mutations(ctx, 0)
+	if err != nil {
+		t.Fatalf("Mutations(0): %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("Mutations(0) = %d, want 3", len(all))
+	}
+	if all[0].ID != ids[2] || all[1].ID != ids[1] || all[2].ID != ids[0] {
+		t.Errorf("Mutations(0) order = %d,%d,%d, want newest first %d,%d,%d",
+			all[0].ID, all[1].ID, all[2].ID, ids[2], ids[1], ids[0])
+	}
+
+	limited, err := l.Mutations(ctx, 2)
+	if err != nil {
+		t.Fatalf("Mutations(2): %v", err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("Mutations(2) = %d, want 2", len(limited))
+	}
+	if limited[0].ID != ids[2] || limited[1].ID != ids[1] {
+		t.Errorf("Mutations(2) = %d,%d, want the two newest %d,%d", limited[0].ID, limited[1].ID, ids[2], ids[1])
+	}
+}
+
+func TestUpsertScenesFailsWhenAnInsertIsBlockedAtExecTime(t *testing.T) {
+	cases := []struct {
+		name  string
+		table string
+	}{
+		{"scene", "scene"},
+		{"file", "file"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			l := newTestLedger(t)
+			blockWith(t, l, "INSERT", c.table)
+
+			runID, err := l.BeginRun(ctx, "full", "")
+			if err != nil {
+				t.Fatalf("BeginRun: %v", err)
+			}
+			if err := l.UpsertScenes(ctx, runID, twoScenes()); err == nil {
+				t.Errorf("UpsertScenes should fail when %s INSERT is blocked", c.table)
+			}
+		})
+	}
+}
+
+func TestReplaceChildrenFailsWhenADeleteIsBlockedAtExecTime(t *testing.T) {
+	cases := []struct {
+		name  string
+		table string
+	}{
+		{"performer", "scene_performer"},
+		{"tag", "scene_tag"},
+		{"url", "scene_url"},
+		{"stash_id", "scene_stash_id"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			l := newTestLedger(t)
+
+			// A trigger only fires on a DELETE that actually removes a row,
+			// so scene 1 must already carry a child row of this kind before
+			// the blocked re-upsert tries to clear it.
+			run1, err := l.BeginRun(ctx, "full", "")
+			if err != nil {
+				t.Fatalf("BeginRun 1: %v", err)
+			}
+			if err := l.UpsertScenes(ctx, run1, twoScenes()); err != nil {
+				t.Fatalf("UpsertScenes 1: %v", err)
+			}
+			blockWith(t, l, "DELETE", c.table)
+
+			run2, err := l.BeginRun(ctx, "full", "")
+			if err != nil {
+				t.Fatalf("BeginRun 2: %v", err)
+			}
+			if err := l.UpsertScenes(ctx, run2, twoScenes()); err == nil {
+				t.Errorf("UpsertScenes should fail when %s DELETE is blocked", c.table)
+			}
+		})
+	}
+}
+
+func TestTombstoneUnseenFailsWhenAnUpdateIsBlockedAtExecTime(t *testing.T) {
+	cases := []struct {
+		name  string
+		table string
+	}{
+		{"scene", "scene"},
+		{"file", "file"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			l := newTestLedger(t)
+
+			runID, err := l.BeginRun(ctx, "full", "")
+			if err != nil {
+				t.Fatalf("BeginRun: %v", err)
+			}
+			if err := l.UpsertScenes(ctx, runID, twoScenes()); err != nil {
+				t.Fatalf("UpsertScenes: %v", err)
+			}
+			blockWith(t, l, "UPDATE", c.table)
+
+			nextRun, err := l.BeginRun(ctx, "full", "")
+			if err != nil {
+				t.Fatalf("BeginRun 2: %v", err)
+			}
+			if _, _, err := l.TombstoneUnseen(ctx, nextRun); err == nil {
+				t.Errorf("TombstoneUnseen should fail when %s UPDATE is blocked", c.table)
+			}
+		})
+	}
+}
+
+func TestMarkMutationOnAMissingIDIsANoop(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	if err := l.MarkMutation(ctx, 999999, true, "note"); err != nil {
+		t.Fatalf("MarkMutation on a missing id should not error: %v", err)
+	}
+
+	entries, err := l.Mutations(ctx, 0)
+	if err != nil {
+		t.Fatalf("Mutations: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Mutations = %+v, want none (MarkMutation on a missing id creates nothing)", entries)
 	}
 }

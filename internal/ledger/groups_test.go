@@ -3,8 +3,10 @@ package ledger
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	stash "github.com/Anastylosis/stash-go"
 )
@@ -598,5 +600,320 @@ func TestReplaceGroupsFailsWhenCandidateGroupTableIsMissing(t *testing.T) {
 	}
 	if err := l.ReplaceGroups(ctx, runID, sampleGroups()); err == nil {
 		t.Error("ReplaceGroups should fail when candidate_group is missing")
+	}
+}
+
+// A BEFORE trigger that RAISEs lets a statement prepare cleanly against a
+// table that still exists, but fails at exec time — the only way to reach
+// upsertGroup's per-statement error branches without a table missing at
+// prepare time (which fails one statement earlier, in prepareGroupStatements).
+func blockWith(t *testing.T, l *Ledger, event, table string) {
+	t.Helper()
+	trigger := fmt.Sprintf(`CREATE TRIGGER blk_%s_%s BEFORE %s ON %s BEGIN SELECT RAISE(ABORT, 'blocked'); END`,
+		event, table, event, table)
+	if _, err := l.DB().Exec(trigger); err != nil {
+		t.Fatalf("creating blocking trigger on %s %s: %v", event, table, err)
+	}
+}
+
+func TestReplaceGroupsFailsWhenAnInsertIsBlockedAtExecTime(t *testing.T) {
+	cases := []struct {
+		name  string
+		table string
+	}{
+		{"group", "candidate_group"},
+		{"scene", "candidate_scene"},
+		{"evidence", "candidate_evidence"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			l := newTestLedger(t)
+			blockWith(t, l, "INSERT", c.table)
+
+			runID, err := l.BeginRun(ctx, "scan", "")
+			if err != nil {
+				t.Fatalf("BeginRun: %v", err)
+			}
+			if err := l.ReplaceGroups(ctx, runID, sampleGroups()[:1]); err == nil {
+				t.Errorf("ReplaceGroups should fail when %s INSERT is blocked", c.table)
+			}
+		})
+	}
+}
+
+func TestReplaceGroupsFailsWhenADeleteIsBlockedAtExecTime(t *testing.T) {
+	cases := []struct {
+		name  string
+		table string
+	}{
+		{"scene", "candidate_scene"},
+		{"evidence", "candidate_evidence"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			l := newTestLedger(t)
+
+			run1, err := l.BeginRun(ctx, "scan", "")
+			if err != nil {
+				t.Fatalf("BeginRun 1: %v", err)
+			}
+			if err := l.ReplaceGroups(ctx, run1, sampleGroups()[:1]); err != nil {
+				t.Fatalf("ReplaceGroups 1: %v", err)
+			}
+
+			blockWith(t, l, "DELETE", c.table)
+
+			run2, err := l.BeginRun(ctx, "scan", "")
+			if err != nil {
+				t.Fatalf("BeginRun 2: %v", err)
+			}
+			if err := l.ReplaceGroups(ctx, run2, sampleGroups()[:1]); err == nil {
+				t.Errorf("ReplaceGroups should fail when %s DELETE is blocked", c.table)
+			}
+		})
+	}
+}
+
+func TestSetOutcomeRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	scanRun, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun (scan): %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, scanRun, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	applyRun, err := l.BeginRun(ctx, "apply", "")
+	if err != nil {
+		t.Fatalf("BeginRun (apply): %v", err)
+	}
+	if err := l.SetOutcome(ctx, "hash1+hash2", VerdictQuarantined, applyRun); err != nil {
+		t.Fatalf("SetOutcome: %v", err)
+	}
+
+	got, err := l.Groups(ctx, GroupFilter{Verdict: VerdictQuarantined})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Groups(quarantined) = %d, want 1", len(got))
+	}
+	g := got[0]
+	if g.Verdict != VerdictQuarantined {
+		t.Errorf("Verdict = %q, want quarantined", g.Verdict)
+	}
+	if g.AppliedRun != applyRun {
+		t.Errorf("AppliedRun = %d, want %d", g.AppliedRun, applyRun)
+	}
+	if g.AppliedAt == "" {
+		t.Error("AppliedAt is empty, want the apply run's started_at")
+	}
+}
+
+func TestSetOutcomeWithZeroRunIDStoresNullAppliedRun(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	if err := l.SetOutcome(ctx, "hash1+hash2", VerdictDismissed, 0); err != nil {
+		t.Fatalf("SetOutcome: %v", err)
+	}
+
+	var appliedRun sql.NullInt64
+	if err := l.DB().QueryRowContext(ctx,
+		`SELECT applied_run FROM candidate_group WHERE signature = ?`, "hash1+hash2").
+		Scan(&appliedRun); err != nil {
+		t.Fatalf("reading applied_run: %v", err)
+	}
+	if appliedRun.Valid {
+		t.Errorf("applied_run = %v, want NULL for a zero runID", appliedRun)
+	}
+}
+
+func TestSetOutcomeFailsWhenCandidateGroupTableIsMissing(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_group`); err != nil {
+		t.Fatalf("dropping candidate_group: %v", err)
+	}
+	if err := l.SetOutcome(ctx, "sig", VerdictQuarantined, 1); err == nil {
+		t.Error("SetOutcome should fail when candidate_group is missing")
+	}
+}
+
+func TestGroupsFilterAppliedBeforeExcludesAJustAppliedGroup(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	scanRun, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun (scan): %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, scanRun, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	// Insert the applying run directly so its started_at is a known,
+	// controllable instant rather than whatever time.Now() happens to be.
+	appliedAt := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	res, err := l.DB().ExecContext(ctx, `INSERT INTO run(started_at, kind) VALUES(?, 'apply')`,
+		appliedAt.Format(time.RFC3339))
+	if err != nil {
+		t.Fatalf("inserting apply run: %v", err)
+	}
+	applyRun, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("reading apply run id: %v", err)
+	}
+	if err := l.SetOutcome(ctx, "hash1+hash2", VerdictQuarantined, applyRun); err != nil {
+		t.Fatalf("SetOutcome: %v", err)
+	}
+
+	// AppliedBefore exactly the run's own started_at excludes it: the run
+	// did not start strictly before itself.
+	atBoundary, err := l.Groups(ctx, GroupFilter{AppliedBefore: appliedAt})
+	if err != nil {
+		t.Fatalf("Groups (AppliedBefore=appliedAt): %v", err)
+	}
+	if len(atBoundary) != 0 {
+		t.Errorf("Groups(AppliedBefore=appliedAt) = %+v, want none (just applied)", atBoundary)
+	}
+
+	// A moment after the apply run started, the group counts as old enough.
+	after, err := l.Groups(ctx, GroupFilter{AppliedBefore: appliedAt.Add(time.Second)})
+	if err != nil {
+		t.Fatalf("Groups (AppliedBefore=after): %v", err)
+	}
+	if len(after) != 1 || after[0].Signature != "hash1+hash2" {
+		t.Errorf("Groups(AppliedBefore=after) = %+v, want just hash1+hash2", after)
+	}
+}
+
+func TestGroupsFilterAppliedBeforeExcludesAnUnappliedGroup(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	got, err := l.Groups(ctx, GroupFilter{AppliedBefore: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Groups(AppliedBefore) = %+v, want none (group was never applied)", got)
+	}
+}
+
+func TestGroupsFailsWhenCandidateSceneTableIsMissingOnRead(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_scene`); err != nil {
+		t.Fatalf("dropping candidate_scene: %v", err)
+	}
+	if _, err := l.Groups(ctx, GroupFilter{}); err == nil {
+		t.Error("Groups should fail when candidate_scene is missing")
+	}
+}
+
+func TestGroupsFailsWhenCandidateStepTableIsMissingOnRead(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_step`); err != nil {
+		t.Fatalf("dropping candidate_step: %v", err)
+	}
+	if _, err := l.Groups(ctx, GroupFilter{}); err == nil {
+		t.Error("Groups should fail when candidate_step is missing")
+	}
+}
+
+func TestGroupsFailsWhenCandidateEvidenceTableIsMissingOnRead(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := l.ReplaceGroups(ctx, runID, sampleGroups()[:1]); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+	if _, err := l.DB().ExecContext(ctx, `DROP TABLE candidate_evidence`); err != nil {
+		t.Fatalf("dropping candidate_evidence: %v", err)
+	}
+	if _, err := l.Groups(ctx, GroupFilter{}); err == nil {
+		t.Error("Groups should fail when candidate_evidence is missing")
+	}
+}
+
+func TestStatsQuarantinedAndReclaimedBytesExcludedFromReclaimable(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	groups := []Group{
+		{Signature: "certain1", SceneIDs: []string{"1"}, Verdict: VerdictCertain, Reclaimable: 50},
+		{Signature: "dismissed1", SceneIDs: []string{"4"}, Verdict: VerdictDismissed, Reclaimable: 25},
+		{Signature: "quarantined1", SceneIDs: []string{"2"}, Verdict: VerdictQuarantined, Reclaimable: 100},
+		{Signature: "reclaimed1", SceneIDs: []string{"3"}, Verdict: VerdictReclaimed, Reclaimable: 200},
+	}
+	if err := l.ReplaceGroups(ctx, runID, groups); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+
+	stats, err := l.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if stats.GroupsDismissed != 1 {
+		t.Errorf("GroupsDismissed = %d, want 1", stats.GroupsDismissed)
+	}
+	if stats.GroupsQuarantined != 1 || stats.QuarantinedBytes != 100 {
+		t.Errorf("quarantined = %d groups, %d bytes, want 1, 100", stats.GroupsQuarantined, stats.QuarantinedBytes)
+	}
+	if stats.GroupsReclaimed != 1 || stats.ReclaimedBytes != 200 {
+		t.Errorf("reclaimed = %d groups, %d bytes, want 1, 200", stats.GroupsReclaimed, stats.ReclaimedBytes)
+	}
+	// The certain and dismissed groups' bytes count as reclaimable —
+	// quarantined and reclaimed groups are spoken for or already freed, not
+	// pending.
+	if stats.ReclaimableBytes != 75 {
+		t.Errorf("ReclaimableBytes = %d, want 75 (quarantined/reclaimed excluded)", stats.ReclaimableBytes)
 	}
 }
