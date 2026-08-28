@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TestEmbeddedDefaultsParse is the most important test in this package: it
@@ -260,5 +262,160 @@ func TestWriteDefaultCreatesFile(t *testing.T) {
 	// The file should be byte-identical to the embedded YAML, comments and all.
 	if string(data) != string(DefaultYAML()) {
 		t.Error("written file does not match embedded default YAML")
+	}
+}
+
+// Load must report a user file that fails to parse, not silently fall back
+// to defaults.
+func TestLoadRejectsMalformedYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("stash: [this is not valid: yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected an error for malformed YAML, got nil")
+	}
+	if !strings.Contains(err.Error(), "parsing") {
+		t.Errorf("expected a parsing error, got: %v", err)
+	}
+}
+
+// A read failure other than "not exist" — e.g. path is a directory — must be
+// reported rather than silently treated as a missing file.
+func TestLoadReportsReadErrorsOtherThanNotExist(t *testing.T) {
+	dir := t.TempDir() // a directory, not a file — os.ReadFile refuses it.
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected an error reading a directory as the config file, got nil")
+	}
+	if !strings.Contains(err.Error(), "reading") {
+		t.Errorf("expected a reading error, got: %v", err)
+	}
+}
+
+func TestValidateChecksEachField(t *testing.T) {
+	base := func() Config {
+		return Config{
+			Stash:      Stash{URL: "http://example.test"},
+			Quarantine: Quarantine{Dir: "/data/_q", Tag: "_q"},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{"empty stash url", func(c *Config) { c.Stash.URL = "" }, "stash.url"},
+		{"negative phash distance", func(c *Config) { c.Scan.PhashDistance = -1 }, "scan.phash_distance"},
+		{"negative duration diff", func(c *Config) { c.Scan.DurationDiffSeconds = -1 }, "scan.duration_diff_seconds"},
+		{"empty quarantine dir", func(c *Config) { c.Quarantine.Dir = "" }, "quarantine.dir"},
+		{"empty quarantine tag", func(c *Config) { c.Quarantine.Tag = "" }, "quarantine.tag"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base()
+			tt.mutate(&cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("expected a validation error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want it to mention %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+
+	valid := base()
+	if err := valid.Validate(); err != nil {
+		t.Errorf("expected the base config to validate clean, got: %v", err)
+	}
+}
+
+func TestProblemString(t *testing.T) {
+	p := Problem{Key: "scoring", Detail: "retired — see the keeper rules"}
+	if got, want := p.String(), "scoring: retired — see the keeper rules"; got != want {
+		t.Errorf("Problem.String() = %q, want %q", got, want)
+	}
+}
+
+// Check must report a read failure other than "not exist" rather than
+// treating it as a missing (and therefore valid) file.
+func TestCheckReportsReadErrorsOtherThanNotExist(t *testing.T) {
+	dir := t.TempDir()
+	_, err := Check(dir) // a directory, not a file
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+}
+
+// A config file that fails to parse is Load's problem to report — Check
+// surfaces it as a "config" problem rather than erroring itself.
+func TestCheckReportsUnparsableConfigAsAProblem(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("stash: [not valid yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := Check(path)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(problems) != 1 || problems[0].Key != "config" {
+		t.Errorf("expected a single config problem, got %v", problems)
+	}
+}
+
+// A config that parses but fails Validate is also reported as a "config"
+// problem.
+func TestCheckReportsValidationFailureAsAProblem(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	userYAML := "stash:\n  url: http://example.test\nquarantine:\n  dir: \"\"\n"
+	if err := os.WriteFile(path, []byte(userYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := Check(path)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(problems) != 1 || problems[0].Key != "config" {
+		t.Errorf("expected a single config problem, got %v", problems)
+	}
+	if !strings.Contains(problems[0].Detail, "quarantine.dir") {
+		t.Errorf("expected the problem to mention quarantine.dir, got %q", problems[0].Detail)
+	}
+}
+
+// retiredIn must not choke on a file that doesn't even parse as YAML — that
+// is Load's error to report, not retiredIn's.
+func TestRetiredInIgnoresUnparsableInput(t *testing.T) {
+	got := retiredIn([]byte("not: [valid: yaml"))
+	if got != nil {
+		t.Errorf("retiredIn on unparsable input = %v, want nil", got)
+	}
+}
+
+func TestMarshalYAMLRoundTrips(t *testing.T) {
+	cfg, err := Load("/this/file/does/not/exist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := MarshalYAML(cfg)
+	if err != nil {
+		t.Fatalf("MarshalYAML: %v", err)
+	}
+	if !strings.Contains(string(out), "url:") {
+		t.Errorf("expected marshaled YAML to contain stash.url, got:\n%s", out)
+	}
+
+	roundTripped := &Config{}
+	if err := yaml.Unmarshal(out, roundTripped); err != nil {
+		t.Fatalf("marshaled YAML does not parse: %v", err)
+	}
+	if roundTripped.Stash.URL != cfg.Stash.URL {
+		t.Errorf("round-tripped Stash.URL = %q, want %q", roundTripped.Stash.URL, cfg.Stash.URL)
 	}
 }

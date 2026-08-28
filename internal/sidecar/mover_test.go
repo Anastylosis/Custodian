@@ -189,3 +189,132 @@ func TestMover_UnmappedPathErrors(t *testing.T) {
 		t.Fatal("expected an error for an unmapped path")
 	}
 }
+
+// The destination side of the mapping is checked independently of the source.
+func TestMover_UnmappedDestinationErrors(t *testing.T) {
+	fs := vfs.NewMem("/lib/a/old.mp4", "/lib/a/old.srt")
+	mv := newTestMover(t, fs, []pathmap.Rule{{StashPrefix: "/data", LocalPrefix: "/lib"}})
+	if _, err := mv.Plan(context.Background(), "/data/a/old.mp4", "/other/b.mp4"); err == nil {
+		t.Fatal("expected an error for an unmapped destination path")
+	}
+}
+
+// Sub-directories in the listing must not be treated as sidecar candidates.
+func TestMover_PlanIgnoresSubdirectories(t *testing.T) {
+	fs := vfs.NewMem(
+		"/lib/a/old.mp4",
+		"/lib/a/old.srt",
+		"/lib/a/old.d/nested.srt",
+	)
+	mv := newTestMover(t, fs, []pathmap.Rule{{StashPrefix: "/data", LocalPrefix: "/lib"}})
+	moves, err := mv.Plan(context.Background(), "/data/a/old.mp4", "/data/a/new.mp4")
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(moves) != 1 || moves[0].SrcStash != "/data/a/old.srt" {
+		t.Fatalf("Plan returned %+v, want exactly the old.srt sidecar (subdirectory must be ignored)", moves)
+	}
+}
+
+func TestNewMover_NilFS(t *testing.T) {
+	mp, err := pathmap.New(nil)
+	if err != nil {
+		t.Fatalf("pathmap.New: %v", err)
+	}
+	if _, err := NewMover(nil, mp, nil); err == nil {
+		t.Fatal("expected an error for a nil filesystem")
+	}
+}
+
+func TestMover_WithSourceAndSourceFS(t *testing.T) {
+	var nilMv *Mover
+	if got := nilMv.WithSource(vfs.NewMem()); got != nilMv {
+		t.Errorf("nil Mover.WithSource = %v, want the same nil Mover", got)
+	}
+	if got := nilMv.SourceFS(); got != nil {
+		t.Errorf("nil Mover.SourceFS = %v, want nil", got)
+	}
+
+	libFS := vfs.NewMem("/lib/a/old.mp4")
+	mv := newTestMover(t, libFS, nil)
+	if mv.WithSource(nil) != mv {
+		t.Error("WithSource(nil) should return the receiver unchanged")
+	}
+	if mv.SourceFS() != libFS {
+		t.Error("SourceFS should default to the library filesystem")
+	}
+
+	srcFS := vfs.NewMem("/loose/old.srt")
+	mv2 := mv.WithSource(srcFS)
+	if mv2 == mv {
+		t.Error("WithSource should return a copy, not mutate the receiver")
+	}
+	if mv2.SourceFS() != srcFS {
+		t.Errorf("SourceFS() = %v, want %v", mv2.SourceFS(), srcFS)
+	}
+	if mv.SourceFS() != libFS {
+		t.Error("the original Mover's source must be unaffected by WithSource")
+	}
+}
+
+func TestMover_Describe(t *testing.T) {
+	mv := newTestMover(t, vfs.NewMem(), nil)
+	if got := mv.Describe(); got != "in-memory (test)" {
+		t.Errorf("Describe() = %q, want %q", got, "in-memory (test)")
+	}
+}
+
+// flakyFS wraps Mem so Exists can be made to fail for one path, exercising
+// Apply's error-propagation branch that Mem alone can never trigger.
+type flakyFS struct {
+	*vfs.Mem
+	failExists map[string]error
+}
+
+func (f *flakyFS) Exists(ctx context.Context, p string) (bool, error) {
+	if err, ok := f.failExists[p]; ok {
+		return false, err
+	}
+	return f.Mem.Exists(ctx, p)
+}
+
+func TestMover_ApplyExistsError(t *testing.T) {
+	boom := errors.New("stat failed")
+	fs := &flakyFS{
+		Mem:        vfs.NewMem("/lib/a/old.mp4", "/lib/a/old.srt"),
+		failExists: map[string]error{"/lib/a/new.srt": boom},
+	}
+	mv := newTestMover(t, fs, []pathmap.Rule{{StashPrefix: "/data", LocalPrefix: "/lib"}})
+	ctx := context.Background()
+
+	moves, err := mv.Plan(ctx, "/data/a/old.mp4", "/data/a/new.mp4")
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	res := mv.Apply(ctx, moves)
+	if len(res.Failed) != 1 {
+		t.Fatalf("want 1 failure, got %+v", res)
+	}
+	if !errors.Is(res.Failed[0].Err, boom) {
+		t.Errorf("failure lost its cause: %v", res.Failed[0].Err)
+	}
+}
+
+// A source that disappears between Plan and Apply must be skipped, not
+// reported as a hard failure — mirrors a genuine TOCTOU race.
+func TestMover_ApplySourceVanished(t *testing.T) {
+	fs := vfs.NewMem("/lib/a/old.mp4", "/lib/a/old.srt")
+	mv := newTestMover(t, fs, []pathmap.Rule{{StashPrefix: "/data", LocalPrefix: "/lib"}})
+	ctx := context.Background()
+
+	moves, err := mv.Plan(ctx, "/data/a/old.mp4", "/data/a/new.mp4")
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	delete(fs.Files, "/lib/a/old.srt")
+
+	res := mv.Apply(ctx, moves)
+	if len(res.Skipped) != 1 || res.Skipped[0].Reason != "source vanished before the move" {
+		t.Fatalf("want 1 skip for vanished source, got %+v", res)
+	}
+}

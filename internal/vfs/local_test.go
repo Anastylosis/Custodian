@@ -152,6 +152,33 @@ func TestLocalRenameMissingSource(t *testing.T) {
 	}
 }
 
+func TestLocalRenamePropagatesDestinationExistsCheckError(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	writeFile(t, src, "x")
+
+	err := NewLocal().Rename(context.Background(), src, "bad\x00path")
+	if err == nil {
+		t.Fatal("Rename with an invalid destination returned no error")
+	}
+	if errors.Is(err, ErrExist) {
+		t.Error("an invalid-path stat error was reported as ErrExist")
+	}
+}
+
+func TestLocalRenamePropagatesMkdirFailure(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	writeFile(t, src, "x")
+	blocker := filepath.Join(dir, "blocker")
+	writeFile(t, blocker, "x")
+
+	err := NewLocal().Rename(context.Background(), src, filepath.Join(blocker, "child"))
+	if err == nil {
+		t.Fatal("Rename onto a destination whose parent is a file returned no error")
+	}
+}
+
 // copyThenRemove is the cross-filesystem path. It cannot be reached from a
 // single temp dir — os.Rename succeeds there — so it is exercised directly.
 // It is the branch that runs when the library is on a NAS, which is the
@@ -278,6 +305,367 @@ func TestLocalHonoursACancelledContext(t *testing.T) {
 	}
 	if err := l.Rename(ctx, filepath.Join(dir, "a.srt"), filepath.Join(dir, "b.srt")); !errors.Is(err, context.Canceled) {
 		t.Errorf("Rename = %v, want context.Canceled", err)
+	}
+}
+
+func TestLocalReadDirNonNotExistErrorIsWrapped(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "not-a-dir")
+	writeFile(t, file, "x")
+
+	// os.ReadDir on a regular file fails with something other than
+	// os.ErrNotExist, which must surface rather than be swallowed as "empty".
+	if _, err := NewLocal().ReadDir(context.Background(), file); err == nil {
+		t.Fatal("ReadDir on a file returned no error")
+	}
+}
+
+func TestLocalExistsNonNotExistErrorIsWrapped(t *testing.T) {
+	// A NUL byte makes the path invalid, which os.Lstat rejects with an error
+	// other than ErrNotExist — that must be reported, not swallowed as "absent".
+	_, err := NewLocal().Exists(context.Background(), "bad\x00path")
+	if err == nil {
+		t.Fatal("Exists on an invalid path returned no error")
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		t.Error("an invalid-path error was reported as ErrNotExist")
+	}
+}
+
+func TestLocalMkdirAllCreatesNestedDirs(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a", "b", "c")
+	if err := NewLocal().MkdirAll(context.Background(), target); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if fi, err := os.Stat(target); err != nil || !fi.IsDir() {
+		t.Errorf("target not created as a directory: %v, %v", fi, err)
+	}
+}
+
+func TestLocalMkdirAllErrorsWhenAComponentIsAFile(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	writeFile(t, blocker, "x")
+
+	err := NewLocal().MkdirAll(context.Background(), filepath.Join(blocker, "child"))
+	if err == nil {
+		t.Fatal("MkdirAll through a file component returned no error")
+	}
+}
+
+func TestLocalCreateErrorsWhenParentIsAFile(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	writeFile(t, blocker, "x")
+
+	if _, err := NewLocal().Create(context.Background(), filepath.Join(blocker, "child.srt")); err == nil {
+		t.Fatal("Create under a file parent returned no error")
+	}
+}
+
+func TestLocalCreateErrorsOnAnExistingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewLocal().Create(context.Background(), sub); err == nil {
+		t.Fatal("Create onto an existing directory returned no error")
+	}
+}
+
+func TestLocalRemoveOfAMissingFileIsNotAnError(t *testing.T) {
+	dir := t.TempDir()
+	if err := NewLocal().Remove(context.Background(), filepath.Join(dir, "absent")); err != nil {
+		t.Errorf("Remove(absent) = %v, want nil", err)
+	}
+}
+
+func TestLocalRemoveErrorsOnANonEmptyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	writeFile(t, filepath.Join(sub, "child"), "x")
+
+	if err := NewLocal().Remove(context.Background(), sub); err == nil {
+		t.Fatal("Remove of a non-empty directory returned no error")
+	}
+}
+
+func TestCopyThenRemoveErrorsWhenSourceIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	err := copyThenRemove(filepath.Join(dir, "absent"), filepath.Join(dir, "dst"))
+	if err == nil {
+		t.Fatal("copyThenRemove with a missing source returned no error")
+	}
+}
+
+func TestCopyThenRemoveErrorsWhenAPartialFileAlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.srt")
+	dst := filepath.Join(dir, "dst.srt")
+	writeFile(t, src, "body")
+	writeFile(t, dst+".sj-partial", "stale leftover")
+
+	err := copyThenRemove(src, dst)
+	if err == nil {
+		t.Fatal("copyThenRemove with a pre-existing partial file returned no error")
+	}
+	if _, statErr := os.Lstat(src); statErr != nil {
+		t.Error("source was removed despite the copy failing")
+	}
+}
+
+func TestCopyThenRemoveErrorsWhenSourceIsADirectory(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src-dir")
+	if err := os.Mkdir(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "dst.srt")
+
+	if err := copyThenRemove(src, dst); err == nil {
+		t.Fatal("copyThenRemove with a directory source returned no error")
+	}
+	// The partial file must not be left behind after a failed copy.
+	if _, statErr := os.Lstat(dst + ".sj-partial"); !errors.Is(statErr, os.ErrNotExist) {
+		t.Error("a partial file was left behind after a failed copy")
+	}
+}
+
+func TestCopyThenRemoveErrorsWhenDestinationIsADirectory(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.srt")
+	writeFile(t, src, "body")
+	dst := filepath.Join(dir, "dst-is-a-dir")
+	if err := os.Mkdir(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyThenRemove(src, dst); err == nil {
+		t.Fatal("copyThenRemove onto an existing directory returned no error")
+	}
+	if _, statErr := os.Lstat(dst + ".sj-partial"); !errors.Is(statErr, os.ErrNotExist) {
+		t.Error("a partial file was left behind after a failed finalise")
+	}
+}
+
+// Regression guard for e9378a6: the source handle must be closed before
+// os.Remove is attempted, or the final unlink fails on Windows even though
+// the copy itself succeeded.
+func TestCopyThenRemoveClosesSourceBeforeRemoving(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.srt")
+	dst := filepath.Join(dir, "out", "dst.srt")
+	writeFile(t, src, "streamed across")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyThenRemove(src, dst); err != nil {
+		t.Fatalf("copyThenRemove: %v", err)
+	}
+	// If the source handle were still open, a second explicit removal attempt
+	// mirrors what an OS holding the file open would refuse; here it must
+	// already be gone.
+	if _, err := os.Lstat(src); !errors.Is(err, os.ErrNotExist) {
+		t.Error("source still present after copyThenRemove")
+	}
+}
+
+func TestLocalReadDir_NonDirectoryErrors(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "not-a-dir")
+	writeFile(t, file, "x")
+
+	if _, err := NewLocal().ReadDir(context.Background(), file); err == nil {
+		t.Fatal("ReadDir on a file should error")
+	}
+}
+
+func TestLocalExists_NonDirectoryParentErrors(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "not-a-dir")
+	writeFile(t, file, "x")
+
+	if _, err := NewLocal().Exists(context.Background(), filepath.Join(file, "child")); err == nil {
+		t.Fatal("Exists under a non-directory parent should error rather than report absence")
+	}
+}
+
+func TestLocalMkdirAll(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a", "b", "c")
+
+	if err := NewLocal().MkdirAll(context.Background(), target); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	fi, err := os.Stat(target)
+	if err != nil || !fi.IsDir() {
+		t.Fatalf("MkdirAll did not create %q", target)
+	}
+}
+
+func TestLocalMkdirAll_NonDirectoryParentErrors(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "not-a-dir")
+	writeFile(t, file, "x")
+
+	if err := NewLocal().MkdirAll(context.Background(), filepath.Join(file, "child")); err == nil {
+		t.Fatal("MkdirAll under a non-directory parent should error")
+	}
+}
+
+func TestLocalRename_SrcExistsCheckErrors(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "not-a-dir")
+	writeFile(t, file, "x")
+
+	err := NewLocal().Rename(context.Background(), filepath.Join(file, "child"), filepath.Join(dir, "dst"))
+	if err == nil {
+		t.Fatal("Rename should surface an error checking a source under a non-directory parent")
+	}
+}
+
+func TestLocalRename_DstExistsCheckErrors(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	writeFile(t, src, "x")
+	file := filepath.Join(dir, "not-a-dir")
+	writeFile(t, file, "x")
+
+	err := NewLocal().Rename(context.Background(), src, filepath.Join(file, "child"))
+	if err == nil {
+		t.Fatal("Rename should surface an error checking a destination under a non-directory parent")
+	}
+}
+
+// os.Rename refuses to move a directory into its own subtree with EINVAL —
+// a real failure that is not the cross-device signature, so it must be
+// reported rather than mistaken for one and retried as a copy.
+func TestLocalRename_NonCrossDeviceFailurePropagates(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "srcdir")
+	if err := os.Mkdir(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(src, "nested", "target")
+
+	err := NewLocal().Rename(context.Background(), src, dst)
+	if err == nil {
+		t.Fatal("expected an error renaming a directory into its own subtree")
+	}
+	if errors.Is(err, ErrExist) || errors.Is(err, ErrNotExist) {
+		t.Errorf("unexpected sentinel error: %v", err)
+	}
+}
+
+func TestCopyThenRemove_OpenSourceFails(t *testing.T) {
+	dir := t.TempDir()
+	err := copyThenRemove(filepath.Join(dir, "absent"), filepath.Join(dir, "dst"))
+	if err == nil {
+		t.Fatal("expected an error opening a missing source")
+	}
+}
+
+func TestCopyThenRemove_TempAlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.srt")
+	dst := filepath.Join(dir, "dst.srt")
+	writeFile(t, src, "body")
+	writeFile(t, dst+".sj-partial", "leftover from a crashed run")
+
+	err := copyThenRemove(src, dst)
+	if err == nil {
+		t.Fatal("expected an error when the temporary name is already occupied")
+	}
+}
+
+func TestCopyThenRemove_ReadingSourceFails(t *testing.T) {
+	dir := t.TempDir()
+	// A directory opens successfully but cannot be read as a file, so the
+	// failure surfaces from io.Copy rather than os.Open.
+	src := filepath.Join(dir, "srcdir")
+	if err := os.Mkdir(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "dst.srt")
+
+	if err := copyThenRemove(src, dst); err == nil {
+		t.Fatal("expected an error copying from a directory")
+	}
+}
+
+func TestCopyThenRemove_FinaliseRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.srt")
+	writeFile(t, src, "body")
+	// dst's parent does not exist, so the final rename fails.
+	dst := filepath.Join(dir, "missing-parent", "dst.srt")
+
+	if err := copyThenRemove(src, dst); err == nil {
+		t.Fatal("expected an error finalising into a missing directory")
+	}
+	if _, err := os.Lstat(dst + ".sj-partial"); !errors.Is(err, os.ErrNotExist) {
+		t.Error("the temporary should have been cleaned up after a failed finalise")
+	}
+}
+
+func TestLocalCreate_HonoursACancelledContext(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := NewLocal().Create(ctx, filepath.Join(dir, "x")); !errors.Is(err, context.Canceled) {
+		t.Errorf("Create = %v, want context.Canceled", err)
+	}
+}
+
+func TestLocalCreate_MkdirFails(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "not-a-dir")
+	writeFile(t, file, "x")
+
+	if _, err := NewLocal().Create(context.Background(), filepath.Join(file, "child")); err == nil {
+		t.Fatal("Create under a non-directory parent should error")
+	}
+}
+
+func TestLocalCreate_OpenFails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "adir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewLocal().Create(context.Background(), filepath.Join(dir, "adir")); err == nil {
+		t.Fatal("Create on an existing directory should error")
+	}
+}
+
+func TestLocalRemove_HonoursACancelledContext(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := NewLocal().Remove(ctx, filepath.Join(dir, "x")); !errors.Is(err, context.Canceled) {
+		t.Errorf("Remove = %v, want context.Canceled", err)
+	}
+}
+
+func TestLocalRemove_MissingFileIsNotAnError(t *testing.T) {
+	dir := t.TempDir()
+	if err := NewLocal().Remove(context.Background(), filepath.Join(dir, "absent")); err != nil {
+		t.Errorf("Remove of a missing file = %v, want nil", err)
+	}
+}
+
+func TestLocalRemove_NonEmptyDirectoryErrors(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(sub, "child"), "x")
+
+	if err := NewLocal().Remove(context.Background(), sub); err == nil {
+		t.Fatal("Remove of a non-empty directory should error")
 	}
 }
 

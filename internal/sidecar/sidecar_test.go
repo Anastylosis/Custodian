@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+func TestStemOf(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"movie.mp4", "movie"},
+		{"a.b.en.srt", "a.b.en"},
+		{"noext", "noext"},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		if got := stemOf(tc.in); got != tc.want {
+			t.Errorf("stemOf(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestIsSidecarOf(t *testing.T) {
 	tests := []struct {
 		name       string

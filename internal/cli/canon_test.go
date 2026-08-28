@@ -139,6 +139,20 @@ func TestBuildCanonSourcesDefaultSkipsUnconfiguredOnes(t *testing.T) {
 	}
 }
 
+func TestStashBoxSourcePropagatesClientError(t *testing.T) {
+	resetCanonFlags()
+	flagCanonSource = "stash-box"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	client := stash.NewClient(srv.URL)
+
+	if _, err := buildCanonSources(context.Background(), &config.Config{}, client); err == nil {
+		t.Fatal("buildCanonSources should propagate the client error from StashBoxes")
+	}
+}
+
 func TestBuildCanonSourcesUnknownSourceErrors(t *testing.T) {
 	resetCanonFlags()
 	flagCanonSource = "bogus"

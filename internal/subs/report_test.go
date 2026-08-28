@@ -111,3 +111,103 @@ func TestWriteJSONOmitsEmptyOptionalCandidateFields(t *testing.T) {
 		}
 	}
 }
+
+func TestSummarizeCountsByVerdict(t *testing.T) {
+	matches := []Match{
+		{Verdict: Confirmed}, {Verdict: Confirmed},
+		{Verdict: Likely},
+		{Verdict: Ambiguous},
+		{Verdict: Unmatched},
+	}
+	got := Summarize(matches, 3)
+	want := Summary{Total: 8, Attached: 3, Confirmed: 2, Likely: 1, Ambiguous: 1, Unmatched: 1}
+	if got != want {
+		t.Errorf("Summarize = %+v, want %+v", got, want)
+	}
+}
+
+// PrintReport is read by a human deciding what to do about AMBIGUOUS rows, so
+// the sections, ordering and per-candidate detail all matter.
+func TestPrintReportOrdersStrongestVerdictsFirst(t *testing.T) {
+	matches := []Match{
+		{
+			Subtitle: Subtitle{Path: "/loose/unmatched.srt", Lang: "en"},
+			Verdict:  Unmatched,
+		},
+		{
+			Subtitle: Subtitle{Path: "/loose/confirmed.srt", Lang: "en", Runtime: 90 * time.Minute},
+			Verdict:  Confirmed,
+			Candidates: []Candidate{{
+				Scene:   SceneRef{ID: "1", Path: "/stash/A.mp4", Duration: 90 * time.Minute},
+				Score:   200,
+				Reasons: []string{"filename match"},
+			}},
+		},
+	}
+	sum := Summarize(matches, 1)
+
+	var buf bytes.Buffer
+	if err := PrintReport(&buf, matches, sum, 5); err != nil {
+		t.Fatalf("PrintReport: %v", err)
+	}
+	out := buf.String()
+
+	confirmedAt := bytes.Index(buf.Bytes(), []byte("--- CONFIRMED ---"))
+	unmatchedAt := bytes.Index(buf.Bytes(), []byte("--- UNMATCHED ---"))
+	if confirmedAt < 0 || unmatchedAt < 0 || confirmedAt > unmatchedAt {
+		t.Errorf("CONFIRMED section did not come before UNMATCHED:\n%s", out)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("already attached: 1")) {
+		t.Errorf("missing already-attached line:\n%s", out)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("confirmed.srt")) || !bytes.Contains(buf.Bytes(), []byte("filename match")) {
+		t.Errorf("missing candidate detail:\n%s", out)
+	}
+}
+
+func TestPrintReportShowsAPlaceholderLangAndNoCandidate(t *testing.T) {
+	matches := []Match{{
+		Subtitle: Subtitle{Path: "/loose/x.srt"}, // no Lang detected
+		Verdict:  Unmatched,
+	}}
+	sum := Summarize(matches, 0)
+
+	var buf bytes.Buffer
+	if err := PrintReport(&buf, matches, sum, 5); err != nil {
+		t.Fatalf("PrintReport: %v", err)
+	}
+	out := buf.String()
+	if !bytes.Contains(buf.Bytes(), []byte("lang ??")) {
+		t.Errorf("missing placeholder language:\n%s", out)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("(no candidate)")) {
+		t.Errorf("missing no-candidate marker:\n%s", out)
+	}
+}
+
+// maxCandidates caps how many rivals are shown per subtitle, so a scene with
+// many close candidates does not flood the report.
+func TestPrintReportCapsCandidatesShown(t *testing.T) {
+	m := Match{
+		Subtitle: Subtitle{Path: "/loose/x.srt", Lang: "en"},
+		Verdict:  Ambiguous,
+		Candidates: []Candidate{
+			{Scene: SceneRef{ID: "1", Path: "/a.mp4"}, Score: 3},
+			{Scene: SceneRef{ID: "2", Path: "/b.mp4"}, Score: 2},
+			{Scene: SceneRef{ID: "3", Path: "/c.mp4"}, Score: 1},
+		},
+	}
+	sum := Summarize([]Match{m}, 0)
+
+	var buf bytes.Buffer
+	if err := PrintReport(&buf, []Match{m}, sum, 2); err != nil {
+		t.Fatalf("PrintReport: %v", err)
+	}
+	out := buf.String()
+	if bytes.Contains(buf.Bytes(), []byte("#3")) {
+		t.Errorf("expected only 2 candidates shown, found a 3rd:\n%s", out)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("#1")) || !bytes.Contains(buf.Bytes(), []byte("#2")) {
+		t.Errorf("missing an expected candidate:\n%s", out)
+	}
+}

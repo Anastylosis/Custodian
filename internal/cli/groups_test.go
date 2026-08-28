@@ -110,6 +110,16 @@ func TestResolveSignatureAcceptsAPrefixAndRefusesAnAmbiguousOne(t *testing.T) {
 	}
 }
 
+func TestResolveSignaturePropagatesLookupError(t *testing.T) {
+	l := newPlanTestLedger(t)
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := resolveSignature(context.Background(), l, "anything"); err == nil {
+		t.Fatal("resolveSignature on a closed ledger should error")
+	}
+}
+
 // The point of keying a decision on the group's signature is that it outlives
 // the group row, so `scan` can re-apply it. Restoring has to clear it for
 // real, or the next scan silently dismisses the group again.

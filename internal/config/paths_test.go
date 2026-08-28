@@ -114,6 +114,113 @@ func TestLocalFilesTakePrecedence(t *testing.T) {
 	}
 }
 
+// With no config.yaml in the working directory but one at the XDG location,
+// the XDG file wins.
+func TestDefaultConfigPathFindsXDGFile(t *testing.T) {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		t.Skip("XDG_CONFIG_HOME is only honoured on freedesktop platforms")
+	}
+	home := t.TempDir()
+	t.Chdir(t.TempDir()) // no ./config.yaml here
+	t.Setenv("HOME", home)
+	xdgConfig := filepath.Join(home, "xdgcfg")
+	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
+
+	want := filepath.Join(xdgConfig, "custodian", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(want), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(want, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := DefaultConfigPath(); got != want {
+		t.Errorf("DefaultConfigPath() = %q, want %q", got, want)
+	}
+}
+
+// With neither a local file nor an XDG one, DefaultConfigPath falls back to
+// the current directory so `config init` has somewhere to write.
+func TestDefaultConfigPathFallsBackWithNothingOnDisk(t *testing.T) {
+	home := t.TempDir()
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "nowhere"))
+
+	if got := DefaultConfigPath(); got != "config.yaml" {
+		t.Errorf("DefaultConfigPath() = %q, want config.yaml", got)
+	}
+}
+
+// When dataHome() cannot resolve anything (no $HOME), DefaultLedgerPath
+// still returns a usable relative path rather than propagating the failure.
+func TestDefaultLedgerPathFallsBackWhenDataHomeIsUnknown(t *testing.T) {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		t.Skip("dataHome always resolves via UserConfigDir on this platform")
+	}
+	t.Chdir(t.TempDir()) // no ./custodian.ledger.sqlite here
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	if got := DefaultLedgerPath(); got != LedgerName {
+		t.Errorf("DefaultLedgerPath() = %q, want %s", got, LedgerName)
+	}
+}
+
+// When os.UserConfigDir() itself fails, DefaultConfigInitPath falls back to
+// the current directory rather than propagating the error.
+func TestDefaultConfigInitPathFallsBackWhenUserConfigDirFails(t *testing.T) {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		t.Skip("UserConfigDir does not depend on $HOME on this platform")
+	}
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	if got := DefaultConfigInitPath(); got != "config.yaml" {
+		t.Errorf("DefaultConfigInitPath() = %q, want config.yaml", got)
+	}
+}
+
+// dataHome itself returns "" (rather than erroring) when $HOME is unset,
+// which is what lets the callers above fall back cleanly.
+func TestDataHomeEmptyWhenHomeIsUnset(t *testing.T) {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		t.Skip("freedesktop layout only")
+	}
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	if got := dataHome(); got != "" {
+		t.Errorf("dataHome() = %q, want empty", got)
+	}
+}
+
+func TestEnsureDirCreatesNestedDirectories(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a", "b", "c", "file.txt")
+	if err := EnsureDir(target); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(dir, "a", "b", "c"))
+	if err != nil {
+		t.Fatalf("expected parent directories to exist: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("expected a directory")
+	}
+}
+
+func TestEnsureDirIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "sub", "file.txt")
+	if err := EnsureDir(target); err != nil {
+		t.Fatalf("EnsureDir (first): %v", err)
+	}
+	if err := EnsureDir(target); err != nil {
+		t.Fatalf("EnsureDir (second, already exists): %v", err)
+	}
+}
+
 // With nothing in the working directory, the ledger belongs under the data
 // root — never beside the config, which is where an older build put it when
 // XDG_CONFIG_HOME was set.
