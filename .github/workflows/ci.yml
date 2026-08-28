@@ -55,11 +55,33 @@ jobs:
       # internal/stash/integration_test.go is free to skip on an empty library
       # and still report green.
       seeded-env-var: SFX_INT_STASH_SEEDED
+      # internal/reclaim/integration_test.go moves and deletes files in the
+      # fixture library — Apply's moveFiles into /library/_quarantine and
+      # Prune's sceneMerge + deleteFiles. The library is mounted read-only by
+      # default (see the reusable workflow's own doc comment), so both of the
+      # following are required together:
+      #   * library-writable: true, mounting the fixture library `:rw`. This
+      #     input only exists in Anastylosis/.github as of 66fb8c2; the `v1`
+      #     tag this job is pinned to still points one commit before that, so
+      #     `v1` has to move past 66fb8c2 (or this job re-pinned to a later
+      #     tag/sha) before this setting takes effect.
+      #   * SFX_INT_STASH_WRITABLE=1, the test's own belt-and-suspenders gate
+      #     so a bare SFX_INT_STASH_URL against someone's read-only or
+      #     production Stash can never trigger it by accident.
+      # There is no generic "set this env var" input on the reusable
+      # workflow (only url-env-var/api-key-env-var/seeded-env-var, each
+      # exported under a caller-chosen *name*), so SFX_INT_STASH_WRITABLE and
+      # SFX_INT_STASH_LIBRARY_DIR (the host path the test stats to confirm a
+      # quarantined file is physically gone, not just gone from Stash's own
+      # bookkeeping) are set directly on test-command instead.
+      library-writable: true
       # No build tag on these tests, so the harness default
-      # (`-tags=integration ./...`) would run nothing. mirror and evidence
-      # carry the same env-gated pattern as internal/stash, so they widen the
-      # same command rather than getting a second job.
-      test-command: go test -count=1 ./internal/stash/... ./internal/mirror/... ./internal/evidence/...
+      # (`-tags=integration ./...`) would run nothing. mirror, evidence and
+      # reclaim carry the same env-gated pattern as internal/stash, so they
+      # widen the same command rather than getting a second job.
+      test-command: >-
+        SFX_INT_STASH_WRITABLE=1 SFX_INT_STASH_LIBRARY_DIR="$RUNNER_TEMP/stash-library"
+        go test -count=1 ./internal/stash/... ./internal/mirror/... ./internal/evidence/... ./internal/reclaim/...
 
 # What Custodian gains by adopting: gotestsum + JUnit + Codecov upload, the
 # coverage step summary, and a cross-build matrix — none of which its hand-
@@ -69,9 +91,11 @@ jobs:
 # Custodian has no Dockerfile, so check-dockerfile-go-version stays off and
 # there is no docker workflow to adopt.
 #
-# Its internal/{stash,mirror,evidence}/integration_test.go files carry no
-# build tag: each is gated on SFX_INT_STASH_URL at runtime instead, so
-# `go test ./...` in the `ci` job skips every one of those tests and stays
-# hermetic. The stash-integration job is what supplies that variable — along
-# with SFX_INT_STASH_SEEDED, which turns the skips into assertions.
+# Its internal/{stash,mirror,evidence,reclaim}/integration_test.go files
+# carry no build tag: each is gated on SFX_INT_STASH_URL at runtime instead,
+# so `go test ./...` in the `ci` job skips every one of those tests and
+# stays hermetic. The stash-integration job is what supplies that variable —
+# along with SFX_INT_STASH_SEEDED, which turns the skips into assertions,
+# and SFX_INT_STASH_WRITABLE, which reclaim's alone additionally requires
+# because it is the only one of the four that moves and deletes files.
 # vet-integration-tag stays off; there is no tag for it to check.
