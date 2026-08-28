@@ -266,7 +266,24 @@ func (f *fakeStash) applySceneUpdate(vars map[string]any) {
 	if v, ok := input["stash_ids"]; ok {
 		sc.StashIDs = stashIDsOf(v)
 	}
+	if v, ok := input["primary_file_id"].(string); ok {
+		reorderPrimary(&sc, v)
+	}
 	f.scenes[id] = sc
+}
+
+// reorderPrimary moves the file with the given id to the front of
+// sc.Files — Scene.PrimaryFile() returns Files[0], mirroring how Stash
+// always answers findScene with the primary file first.
+func reorderPrimary(sc *stash.Scene, fileID string) {
+	for i, f := range sc.Files {
+		if f.ID == fileID {
+			if i != 0 {
+				sc.Files[0], sc.Files[i] = sc.Files[i], sc.Files[0]
+			}
+			return
+		}
+	}
 }
 
 // applyBulkSceneUpdate mutates every named scene's tag list for an

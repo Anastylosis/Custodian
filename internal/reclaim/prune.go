@@ -64,6 +64,9 @@ type PruneGroup struct {
 	Reason    string
 	Rescued   []string
 	Losers    []PruneLoser
+	// Multifile marks a group whose losers are files of the SAME scene as
+	// Keeper (REBUILD.md's Phase 5b) — no sceneMerge, just deleteFiles.
+	Multifile bool
 	Errs      []string
 	Bytes     int64
 	Done      bool
@@ -159,7 +162,10 @@ func writePruneGroup(b *strings.Builder, g PruneGroup, dryRun bool) {
 		ids = append(ids, l.SceneID)
 		fmt.Fprintf(b, "  delete:  %s (%s)\n", l.Path, confirm.HumanBytes(l.Bytes))
 	}
-	if len(ids) > 0 {
+	switch {
+	case g.Multifile && len(g.Losers) > 0:
+		fmt.Fprintf(b, "  %s — same scene, no merge needed\n", verb(dryRun, "deleteFiles", "would deleteFiles"))
+	case len(ids) > 0:
 		fmt.Fprintf(b, "  merge:   %s %s → %s\n",
 			verb(dryRun, "sceneMerge", "would sceneMerge"), strings.Join(ids, ", "), g.Keeper)
 	}
@@ -221,6 +227,10 @@ func (p *pruner) run(ctx context.Context, rep *PruneReport, groups []ledger.Grou
 		return err
 	}
 	for _, g := range groups {
+		if IsMultifileGroup(g) {
+			rep.Groups = append(rep.Groups, p.multifileGroup(ctx, g))
+			continue
+		}
 		rep.Groups = append(rep.Groups, p.group(ctx, g))
 	}
 	p.writeChanges(rep)
@@ -355,6 +365,70 @@ func (p *pruner) mergeAndDelete(ctx context.Context, keeperID string, pg *PruneG
 		Kind: "delete", Target: strings.Join(fileIDs, ", "),
 		From: pathsOf(pg.Losers), Note: "deleteFiles — removes the videos from disk",
 	}, func() error { return p.client.DeleteFiles(ctx, fileIDs...) })
+}
+
+// multifileGroup is Prune's branch for a group whose losers are files of the
+// same scene as its keeper (REBUILD.md's Phase 5b, "make prune branch on
+// this shape"): no sceneMerge — there is only one scene — just deleteFiles
+// on whatever the applying run's mutation log shows it moved into
+// quarantine and this scene still holds.
+func (p *pruner) multifileGroup(ctx context.Context, g ledger.Group) PruneGroup {
+	pg := PruneGroup{Signature: g.Signature, Multifile: true}
+	if len(g.SceneIDs) != 1 {
+		pg.Skipped, pg.Reason = true, fmt.Sprintf("multifile group has %d scenes, want 1", len(g.SceneIDs))
+		return pg
+	}
+	sceneID := g.SceneIDs[0]
+	pg.Keeper, pg.AppliedAt = sceneID, g.AppliedAt
+
+	sc, found, err := p.client.FindScene(ctx, sceneID)
+	switch {
+	case err != nil:
+		pg.Skipped, pg.Reason = true, err.Error()
+		return pg
+	case !found:
+		pg.Skipped, pg.Reason = true, fmt.Sprintf("scene %s is gone from Stash", sceneID)
+		return pg
+	}
+
+	rows, err := p.l.MutationsByRun(ctx, g.AppliedRun)
+	if err != nil {
+		pg.Skipped, pg.Reason = true, err.Error()
+		return pg
+	}
+	for _, f := range sc.Files {
+		if _, ok := findRow(rows, "move", "file "+f.ID); !ok {
+			continue // the file this group kept as primary — never moved
+		}
+		pg.Losers = append(pg.Losers, PruneLoser{SceneID: sceneID, FileID: f.ID, Path: f.Path, Bytes: f.Size})
+		pg.Bytes += f.Size
+	}
+	if len(pg.Losers) == 0 {
+		pg.Skipped, pg.Reason = true, "nothing left to reclaim — the losers are already gone"
+		return pg
+	}
+
+	fileIDs := make([]string, len(pg.Losers))
+	for i, l := range pg.Losers {
+		fileIDs[i] = l.FileID
+	}
+	a := &applier{l: p.l, runID: p.runID, opts: Options{Commit: p.opts.Commit}}
+	if err := a.do(ctx, ledger.Mutation{
+		Kind: "delete", Target: strings.Join(fileIDs, ", "),
+		From: pathsOf(pg.Losers), Note: "deleteFiles — removes the videos from disk",
+	}, func() error { return p.client.DeleteFiles(ctx, fileIDs...) }); err != nil {
+		pg.Errs = append(pg.Errs, err.Error())
+		return pg
+	}
+
+	if p.opts.Commit {
+		if err := p.l.SetOutcome(ctx, g.Signature, ledger.VerdictReclaimed, p.runID); err != nil {
+			pg.Errs = append(pg.Errs, err.Error())
+			return pg
+		}
+	}
+	pg.Done = true
+	return pg
 }
 
 func pathsOf(losers []PruneLoser) string {

@@ -110,6 +110,10 @@ func Apply(ctx context.Context, client *stash.Client, l *ledger.Ledger, opts Opt
 	if err != nil {
 		return rep, err
 	}
+	multifiles, err := multifileGroups(ctx, l, opts.Limit)
+	if err != nil {
+		return rep, err
+	}
 
 	a := &applier{client: client, l: l, opts: opts, used: map[string]bool{}}
 	if opts.Commit {
@@ -120,7 +124,7 @@ func Apply(ctx context.Context, client *stash.Client, l *ledger.Ledger, opts Opt
 		a.runID, rep.RunID = runID, runID
 	}
 
-	err = a.run(ctx, &rep, groups, files, mistags)
+	err = a.run(ctx, &rep, groups, files, mistags, multifiles)
 	if a.runID != 0 {
 		_ = l.FinishRun(ctx, a.runID, ledger.RunSummary{Notes: rep.Summary()})
 	}
@@ -140,12 +144,15 @@ type applier struct {
 	used        map[string]bool
 }
 
-func (a *applier) run(ctx context.Context, rep *Report, groups []ledger.Group, files map[string]ledger.PrimaryFile, mistags []ledger.Group) error {
+func (a *applier) run(ctx context.Context, rep *Report, groups []ledger.Group, files map[string]ledger.PrimaryFile, mistags, multifiles []ledger.Group) error {
 	if err := a.backup(ctx, rep); err != nil {
 		return err
 	}
 	for _, g := range groups {
 		rep.Groups = append(rep.Groups, a.group(ctx, g, files))
+	}
+	for _, g := range multifiles {
+		rep.Multifiles = append(rep.Multifiles, a.multifileGroup(ctx, g))
 	}
 	for _, g := range mistags {
 		rep.Mistags = append(rep.Mistags, a.mistag(ctx, g))
@@ -382,18 +389,21 @@ func (a *applier) quarantine(ctx context.Context, loser *stash.Scene) (LoserRepo
 		return lr, err
 	}
 
-	a.sidecars(ctx, planned, &lr)
+	lr.Sidecars = a.resolveSidecars(ctx, planned)
 	return lr, nil
 }
 
-// sidecars applies the planned companion-file moves, after the video's own
-// move succeeded, and logs each one.
-func (a *applier) sidecars(ctx context.Context, planned []sidecar.PlannedMove, lr *LoserReport) {
-	for _, m := range planned {
-		lr.Sidecars = append(lr.Sidecars, SidecarMove{From: m.SrcStash, To: m.DstStash})
+// resolveSidecars applies the planned companion-file moves, after the
+// video's own move succeeded, and logs each one — a dry run only records the
+// plan. Shared by a loser scene's quarantine and a multifile file's
+// quarantine (quarantineFile), which differ in everything but this tail.
+func (a *applier) resolveSidecars(ctx context.Context, planned []sidecar.PlannedMove) []SidecarMove {
+	out := make([]SidecarMove, len(planned))
+	for i, m := range planned {
+		out[i] = SidecarMove{From: m.SrcStash, To: m.DstStash}
 	}
 	if !a.opts.Commit || len(planned) == 0 {
-		return
+		return out
 	}
 
 	res := a.opts.Sidecars.Apply(ctx, planned)
@@ -408,12 +418,13 @@ func (a *applier) sidecars(ctx context.Context, planned []sidecar.PlannedMove, l
 		outcome[f.Move.SrcStash] = SidecarMove{From: f.Move.SrcStash, To: f.Move.DstStash, Note: f.Err.Error()}
 	}
 
-	for i, m := range lr.Sidecars {
+	for i, m := range out {
 		if got, ok := outcome[m.From]; ok {
-			lr.Sidecars[i] = got
+			out[i] = got
 		}
-		a.logSidecar(ctx, lr.Sidecars[i])
+		a.logSidecar(ctx, out[i])
 	}
+	return out
 }
 
 func (a *applier) logSidecar(ctx context.Context, m SidecarMove) {
@@ -560,6 +571,181 @@ func (a *applier) ensureMistagTag(ctx context.Context) (string, error) {
 	}
 	a.mistagTagID = id
 	return id, nil
+}
+
+// multifileGroups returns the live `certain` groups whose evidence is
+// `multifile`, capped at limit — REBUILD.md's Phase 5b shape: one scene,
+// several byte-equivalent files (§1.5's "Known Stash behaviours": Stash
+// attaches a re-scanned file to an existing scene by oshash/md5 only), with
+// nothing for `plan` to choose between scenes, so these bypass
+// plannedGroups' Keeper requirement entirely and are fetched independently.
+func multifileGroups(ctx context.Context, l *ledger.Ledger, limit int) ([]ledger.Group, error) {
+	all, err := l.Groups(ctx, ledger.GroupFilter{Verdict: ledger.VerdictCertain})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ledger.Group, 0, len(all))
+	for _, g := range all {
+		if !IsMultifileGroup(g) {
+			continue
+		}
+		out = append(out, g)
+		if limit > 0 && len(out) == limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// IsMultifileGroup reports whether g's evidence names it a multifile group.
+// Exported so internal/cli's confirm summaries, which count these groups
+// too, do not have to reimplement the check.
+func IsMultifileGroup(g ledger.Group) bool {
+	for _, e := range g.Evidence {
+		if e.Kind == "multifile" {
+			return true
+		}
+	}
+	return false
+}
+
+// fileChoiceOf returns the file id evidence.MultifileGenerator recorded as
+// the survivor in g's file_choice step, and a reason to skip when there is
+// none — a group `scan` never got to write Steps for.
+func fileChoiceOf(g ledger.Group) (fileID, reason string) {
+	for _, s := range g.Steps {
+		if s.Rule == "file_choice" {
+			return s.Detail, ""
+		}
+	}
+	return "", "no file_choice step recorded — run `custodian scan` again"
+}
+
+// multifileGroup runs the multifile shape of §4.4 for one scene: make the
+// chosen file (evidence.MultifileGenerator's file_choice step) the scene's
+// primary if it is not already, then move every other file in that same
+// scene into quarantine. There is no second scene to union metadata from,
+// and quarantine is pointless for byte-identical copies — but deleteFiles is
+// never the first write against something not yet logged, so the other
+// files still make the same move-then-verdict-quarantined trip a loser
+// scene's file does, just with no tag: the scene has nothing left to
+// distinguish it from any other. Prune later deletes what this leaves
+// behind; no merge is needed since it is all one scene.
+func (a *applier) multifileGroup(ctx context.Context, g ledger.Group) MultifileReport {
+	mr := MultifileReport{Signature: g.Signature}
+	if len(g.SceneIDs) != 1 {
+		mr.Skipped, mr.Reason = true, fmt.Sprintf("multifile group has %d scenes, want 1", len(g.SceneIDs))
+		return mr
+	}
+	sceneID := g.SceneIDs[0]
+	mr.SceneID = sceneID
+
+	chosen, reason := fileChoiceOf(g)
+	if reason != "" {
+		mr.Skipped, mr.Reason = true, reason
+		return mr
+	}
+
+	sc, found, err := a.client.FindScene(ctx, sceneID)
+	switch {
+	case err != nil:
+		mr.Skipped, mr.Reason = true, err.Error()
+		return mr
+	case !found:
+		mr.Skipped, mr.Reason = true, fmt.Sprintf("scene %s is gone from Stash since the last sync", sceneID)
+		return mr
+	}
+	if len(sc.Files) < 2 {
+		mr.Skipped, mr.Reason = true, fmt.Sprintf(
+			"scene %s now holds %d file(s) — nothing left to reclaim", sceneID, len(sc.Files))
+		return mr
+	}
+
+	var chosenFile *stash.File
+	for i := range sc.Files {
+		if sc.Files[i].ID == chosen {
+			chosenFile = &sc.Files[i]
+			break
+		}
+	}
+	if chosenFile == nil {
+		mr.Skipped, mr.Reason = true, fmt.Sprintf("chosen file %s is no longer on scene %s", chosen, sceneID)
+		return mr
+	}
+	mr.Kept, mr.KeptPath = chosenFile.ID, chosenFile.Path
+
+	if primary := sc.PrimaryFile(); primary != nil && primary.ID != chosen {
+		if err := a.setPrimary(ctx, sceneID, primary.ID, chosen); err != nil {
+			mr.Errs = append(mr.Errs, err.Error())
+			return mr
+		}
+		mr.PrimarySet = true
+	}
+
+	if a.opts.Sidecars == nil {
+		mr.Notes = append(mr.Notes,
+			"sidecars: no library access configured, so subtitles beside a moved file stay where they are")
+	}
+
+	for i := range sc.Files {
+		f := sc.Files[i]
+		if f.ID == chosen {
+			continue
+		}
+		moved, err := a.quarantineFile(ctx, f)
+		mr.Moved = append(mr.Moved, moved)
+		mr.Bytes += moved.Bytes
+		if err != nil {
+			mr.Errs = append(mr.Errs, err.Error())
+			return mr
+		}
+	}
+
+	if a.opts.Commit {
+		if err := a.l.SetOutcome(ctx, g.Signature, ledger.VerdictQuarantined, a.runID); err != nil {
+			mr.Errs = append(mr.Errs, err.Error())
+			return mr
+		}
+	}
+	mr.Done = true
+	return mr
+}
+
+// setPrimary is the multifile shape's analogue of union: no metadata to
+// carry, just which file answers when Stash is asked for "the" video. From
+// is the file that was primary before, so `custodian undo` can read it back
+// from the mutation log's from_value and restore it.
+func (a *applier) setPrimary(ctx context.Context, sceneID, from, to string) error {
+	return a.do(ctx, ledger.Mutation{
+		Kind: "primary", Target: "scene " + sceneID, From: from, To: to, Note: "SetPrimaryFile",
+	}, func() error { return a.client.SetPrimaryFile(ctx, sceneID, to) })
+}
+
+// quarantineFile is the multifile shape's per-file quarantine move: the same
+// collision-avoiding basename and sidecar handling as a loser scene's
+// quarantine (quarantine), but keyed by file id rather than scene id —
+// several files share one scene here — and with no tag.
+func (a *applier) quarantineFile(ctx context.Context, f stash.File) (MovedFile, error) {
+	basename := a.quarantineName(f.Basename, f.ID)
+	mf := MovedFile{FileID: f.ID, From: f.Path, Bytes: f.Size, To: pathmap.Join(a.opts.QuarantineDir, basename)}
+
+	// Planned BEFORE the video moves: afterwards the source directory no
+	// longer holds the context that tells competing videos apart.
+	planned, err := a.opts.Sidecars.Plan(ctx, f.Path, mf.To)
+	if err != nil {
+		mf.Notes = append(mf.Notes, fmt.Sprintf("could not inspect sidecars: %v", err))
+	}
+
+	if err := a.do(ctx, ledger.Mutation{
+		Kind: "move", Target: "file " + f.ID, From: f.Path, To: mf.To, Note: "moveFiles",
+	}, func() error {
+		return a.client.MoveFiles(ctx, []string{f.ID}, stash.MoveTarget{Folder: a.opts.QuarantineDir, Basename: basename})
+	}); err != nil {
+		return mf, err
+	}
+
+	mf.Sidecars = a.resolveSidecars(ctx, planned)
+	return mf, nil
 }
 
 func sceneIDsOf(groups []ledger.Group) []string {

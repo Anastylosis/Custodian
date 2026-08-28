@@ -53,6 +53,279 @@ func requireSeeded(t *testing.T, ok bool, format string, args ...any) {
 	t.Skipf(format, args...)
 }
 
+// TestIntegrationUndoThenMultifileApplyAndPrune is the second end-to-end
+// run against the seeded harness, covering the two things
+// TestIntegrationApplyThenPrune does not: Undo, and the multifile shape
+// (REBUILD.md's Phase 5b).
+//
+// It runs BEFORE TestIntegrationApplyThenPrune in this file (Go runs a
+// file's tests in declaration order) deliberately: the fixture seeds
+// exactly one stashdb.org duplicate pair, and TestIntegrationApplyThenPrune
+// fully reclaims it (merge + delete — nothing left to re-discover
+// afterwards). Phase A here applies that same pair, undoes it, and stops —
+// leaving it exactly as fresh as `custodian sync` found it, tag off, file
+// back, keeper fields unchanged — so TestIntegrationApplyThenPrune still
+// finds its one certain group and reclaims it independently, unaffected by
+// having run second. Phase B then does apply-and-prune to `reclaimed` on
+// the OTHER fixture duplicate — the multifile-take1/2.mp4 scene — which
+// nothing else in this file touches, so there is no such handoff to make
+// there: it starts and ends the run fully reclaimed.
+func TestIntegrationUndoThenMultifileApplyAndPrune(t *testing.T) {
+	client := integrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	t.Run("undo restores the stashdb pair to fresh", func(t *testing.T) {
+		testUndoRestoresTheStashdbPairToFresh(ctx, t, client)
+	})
+	t.Run("multifile apply then prune reaches reclaimed", func(t *testing.T) {
+		testMultifileApplyThenPruneReachesReclaimed(ctx, t, client)
+	})
+}
+
+// testUndoRestoresTheStashdbPairToFresh is Phase A of
+// TestIntegrationUndoThenMultifileApplyAndPrune, split out to keep each
+// phase's cyclomatic complexity under the repo's gocyclo gate.
+func testUndoRestoresTheStashdbPairToFresh(ctx context.Context, t *testing.T, client *stash.Client) {
+	l := newLedger(t)
+	if _, err := mirror.Sync(ctx, client, l, mirror.Options{Full: true}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	summary, err := evidence.Run(ctx, l, []evidence.Generator{evidence.StashIDGenerator{}}, evidence.Policy{Tolerance: evidence.DefaultTolerance})
+	if err != nil {
+		t.Fatalf("evidence.Run: %v", err)
+	}
+	requireSeeded(t, summary.Certain >= 1, "summary.Certain = %d, want >= 1 (the stashdb.org duplicate pair)", summary.Certain)
+
+	groups, err := l.Groups(ctx, ledger.GroupFilter{Verdict: ledger.VerdictCertain})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	requireSeeded(t, len(groups) == 1, "certain groups = %d, want 1 (the stashdb.org duplicate pair)", len(groups))
+	group := groups[0]
+
+	files, err := l.PrimaryFiles(ctx, group.SceneIDs)
+	if err != nil {
+		t.Fatalf("PrimaryFiles: %v", err)
+	}
+	choice := keeper.Choose(group, files, keeper.DefaultRules())
+	requireSeeded(t, len(choice.Losers) == 1, "keeper.Choose losers = %v, want exactly 1", choice.Losers)
+	if err := l.SetChoice(ctx, group.Signature, choice.Keeper, choice.Losers, choice.Steps); err != nil {
+		t.Fatalf("SetChoice: %v", err)
+	}
+	keeperID, loserID := choice.Keeper, choice.Losers[0]
+
+	// Captured before Apply touches anything, so undo's restoration can
+	// be checked against ground truth rather than against Apply's own
+	// (possibly buggy) idea of "before".
+	keeperPre, found, err := client.FindScene(ctx, keeperID)
+	if err != nil || !found {
+		t.Fatalf("FindScene(keeper %s) before apply: found=%v err=%v", keeperID, found, err)
+	}
+	loserPre, found, err := client.FindScene(ctx, loserID)
+	if err != nil || !found {
+		t.Fatalf("FindScene(loser %s) before apply: found=%v err=%v", loserID, found, err)
+	}
+	loserOriginalPath := loserPre.PrimaryFile().Path
+
+	applyOpts := Options{QuarantineDir: "/library/_quarantine", BackupDir: t.TempDir(), Commit: true}
+	applyRep, err := Apply(ctx, client, l, applyOpts)
+	if err != nil {
+		t.Fatalf("Apply: %v\n%s", err, applyRep.String())
+	}
+	if done, _, failed, _ := applyRep.Counts(); done != 1 || failed != 0 {
+		t.Fatalf("Apply Counts = done=%d failed=%d, want 1/0\n%s", done, failed, applyRep.String())
+	}
+
+	quarantined, found, err := client.FindScene(ctx, loserID)
+	if err != nil || !found {
+		t.Fatalf("FindScene(loser %s) after apply: found=%v err=%v", loserID, found, err)
+	}
+	if !hasTag(quarantined, DefaultTag) {
+		t.Fatalf("loser %s tags = %v after apply, want %s", loserID, quarantined.Tags, DefaultTag)
+	}
+	if !strings.HasPrefix(quarantined.PrimaryFile().Path, applyOpts.QuarantineDir+"/") {
+		t.Fatalf("loser %s file path = %s after apply, want it under %s/", loserID, quarantined.PrimaryFile().Path, applyOpts.QuarantineDir)
+	}
+
+	undoRep, err := Undo(ctx, client, l, UndoOptions{Signature: group.Signature, Commit: true})
+	if err != nil {
+		t.Fatalf("Undo: %v\n%s", err, undoRep.String())
+	}
+	t.Logf("Undo report:\n%s", undoRep.String())
+	if done, skipped, failed := undoRep.Counts(); done != 1 || skipped != 0 || failed != 0 {
+		t.Fatalf("Undo Counts = done=%d skipped=%d failed=%d, want 1/0/0\n%s", done, skipped, failed, undoRep.String())
+	}
+
+	// Tag gone, file back at its original path.
+	restored, found, err := client.FindScene(ctx, loserID)
+	if err != nil || !found {
+		t.Fatalf("FindScene(loser %s) after undo: found=%v err=%v", loserID, found, err)
+	}
+	if hasTag(restored, DefaultTag) {
+		t.Errorf("loser %s still carries %s after undo: %v", loserID, DefaultTag, restored.Tags)
+	}
+	if restored.PrimaryFile().Path != loserOriginalPath {
+		t.Errorf("loser %s file path = %s after undo, want %s", loserID, restored.PrimaryFile().Path, loserOriginalPath)
+	}
+	if hostDir := os.Getenv("SFX_INT_STASH_LIBRARY_DIR"); hostDir != "" {
+		hostPath := filepath.Join(hostDir, strings.TrimPrefix(loserOriginalPath, "/library/"))
+		if _, err := os.Stat(hostPath); err != nil {
+			t.Errorf("loser file not found on the host at %s after undo: %v", hostPath, err)
+		}
+	}
+
+	// Keeper fields as before: whatever union carried over (nothing, if
+	// the fixture pair already agreed on every field) came back off.
+	keeperPost, found, err := client.FindScene(ctx, keeperID)
+	if err != nil || !found {
+		t.Fatalf("FindScene(keeper %s) after undo: found=%v err=%v", keeperID, found, err)
+	}
+	if keeperPost.Title != keeperPre.Title || keeperPost.Director != keeperPre.Director || keeperPost.Date != keeperPre.Date {
+		t.Errorf("keeper %s fields after undo = %+v, want them back at %+v",
+			keeperID, struct{ Title, Director, Date string }{keeperPost.Title, keeperPost.Director, keeperPost.Date},
+			struct{ Title, Director, Date string }{keeperPre.Title, keeperPre.Director, keeperPre.Date})
+	}
+
+	// Ledger verdict restored.
+	fresh, found, err := l.GroupBySignature(ctx, group.Signature)
+	if err != nil {
+		t.Fatalf("GroupBySignature: %v", err)
+	}
+	requireSeeded(t, found && fresh.Verdict == ledger.VerdictCertain,
+		"group %s verdict after undo = %+v, want certain", group.Signature, fresh)
+
+	// Every undo:* mutation this run wrote is ok.
+	assertRunMutations(t, l, undoRep.RunID, []string{"undo:tag", "undo:move"}, map[string]bool{
+		"undo:tag": true, "undo:move": true,
+	})
+
+	logAllMutations(t, l)
+}
+
+// testMultifileApplyThenPruneReachesReclaimed is Phase B of
+// TestIntegrationUndoThenMultifileApplyAndPrune: the multifile-take1/2.mp4
+// scene, untouched by Phase A or by TestIntegrationApplyThenPrune, taken
+// from `certain` through `quarantined` to `reclaimed`.
+func testMultifileApplyThenPruneReachesReclaimed(ctx context.Context, t *testing.T, client *stash.Client) {
+	l := newLedger(t)
+	if _, err := mirror.Sync(ctx, client, l, mirror.Options{Full: true}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	summary, err := evidence.Run(ctx, l, []evidence.Generator{evidence.MultifileGenerator{}}, evidence.Policy{Tolerance: evidence.DefaultTolerance})
+	if err != nil {
+		t.Fatalf("evidence.Run: %v", err)
+	}
+	requireSeeded(t, summary.Certain >= 1, "summary.Certain = %d, want >= 1 (the multifile-take1/2.mp4 scene)", summary.Certain)
+
+	groups, err := l.Groups(ctx, ledger.GroupFilter{Verdict: ledger.VerdictCertain})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	requireSeeded(t, len(groups) == 1, "certain groups = %d, want 1 (the multifile-take1/2.mp4 scene)", len(groups))
+	group := groups[0]
+	requireSeeded(t, len(group.SceneIDs) == 1, "multifile group scenes = %v, want exactly 1", group.SceneIDs)
+	sceneID := group.SceneIDs[0]
+
+	scenePre, found, err := client.FindScene(ctx, sceneID)
+	if err != nil || !found {
+		t.Fatalf("FindScene(%s) before apply: found=%v err=%v", sceneID, found, err)
+	}
+	requireSeeded(t, len(scenePre.Files) == 2, "scene %s Files = %d before apply, want 2", sceneID, len(scenePre.Files))
+
+	applyOpts := Options{QuarantineDir: "/library/_quarantine", BackupDir: t.TempDir(), Commit: true}
+	applyRep, err := Apply(ctx, client, l, applyOpts)
+	if err != nil {
+		t.Fatalf("Apply: %v\n%s", err, applyRep.String())
+	}
+	t.Logf("Apply report:\n%s", applyRep.String())
+
+	mdone, mskipped, mfailed, _ := applyRep.MultifileCounts()
+	if mdone != 1 || mskipped != 0 || mfailed != 0 {
+		t.Fatalf("Apply MultifileCounts = done=%d skipped=%d failed=%d, want 1/0/0\n%s", mdone, mskipped, mfailed, applyRep.String())
+	}
+	mr := applyRep.Multifiles[0]
+	if len(mr.Moved) != 1 {
+		t.Fatalf("Moved = %+v, want exactly one file quarantined", mr.Moved)
+	}
+	movedFile := mr.Moved[0]
+
+	afterApply, found, err := client.FindScene(ctx, sceneID)
+	if err != nil || !found {
+		t.Fatalf("FindScene(%s) after apply: found=%v err=%v", sceneID, found, err)
+	}
+	if afterApply.PrimaryFile().ID != mr.Kept {
+		t.Errorf("primary after apply = %s, want %s", afterApply.PrimaryFile().ID, mr.Kept)
+	}
+	var quarantinedFile *stash.File
+	for i := range afterApply.Files {
+		if afterApply.Files[i].ID == movedFile.FileID {
+			quarantinedFile = &afterApply.Files[i]
+		}
+	}
+	if quarantinedFile == nil || !strings.HasPrefix(quarantinedFile.Path, applyOpts.QuarantineDir+"/") {
+		t.Fatalf("moved file after apply = %+v, want it under %s/", quarantinedFile, applyOpts.QuarantineDir)
+	}
+
+	assertRunMutations(t, l, applyRep.RunID, []string{"backup", "move"}, map[string]bool{
+		"backup": true, "move": true,
+	})
+
+	quarantinedGroups, err := l.Groups(ctx, ledger.GroupFilter{Verdict: ledger.VerdictQuarantined})
+	if err != nil {
+		t.Fatalf("Groups(quarantined): %v", err)
+	}
+	requireSeeded(t, len(quarantinedGroups) == 1, "quarantined groups = %d, want 1", len(quarantinedGroups))
+
+	time.Sleep(2100 * time.Millisecond)
+	pruneOpts := PruneOptions{Age: time.Nanosecond, BackupDir: t.TempDir(), Commit: true}
+	pruneRep, err := Prune(ctx, client, l, pruneOpts)
+	if err != nil {
+		t.Fatalf("Prune: %v\n%s", err, pruneRep.String())
+	}
+	t.Logf("Prune report:\n%s", pruneRep.String())
+
+	pdone, pskipped, pfailed, _ := pruneRep.Counts()
+	if pdone != 1 || pskipped != 0 || pfailed != 0 {
+		t.Fatalf("Prune Counts = done=%d skipped=%d failed=%d, want 1/0/0\n%s", pdone, pskipped, pfailed, pruneRep.String())
+	}
+	if !pruneRep.Groups[0].Multifile {
+		t.Error("PruneGroup.Multifile = false, want true")
+	}
+
+	afterPrune, found, err := client.FindScene(ctx, sceneID)
+	if err != nil || !found {
+		t.Fatalf("FindScene(%s) after prune: found=%v err=%v", sceneID, found, err)
+	}
+	if len(afterPrune.Files) != 1 {
+		t.Errorf("scene %s Files = %d after prune, want 1", sceneID, len(afterPrune.Files))
+	}
+	if afterPrune.Files[0].ID != mr.Kept {
+		t.Errorf("scene %s's one remaining file = %s after prune, want %s", sceneID, afterPrune.Files[0].ID, mr.Kept)
+	}
+
+	if hostDir := os.Getenv("SFX_INT_STASH_LIBRARY_DIR"); hostDir != "" {
+		hostPath := filepath.Join(hostDir, strings.TrimPrefix(quarantinedFile.Path, "/library/"))
+		if _, err := os.Stat(hostPath); !os.IsNotExist(err) {
+			t.Errorf("quarantined file at %s (err=%v), want it gone from disk", hostPath, err)
+		}
+	} else {
+		t.Log("SFX_INT_STASH_LIBRARY_DIR not set; skipping the host-filesystem check that the file is physically gone")
+	}
+
+	assertRunMutations(t, l, pruneRep.RunID, []string{"backup", "delete"}, map[string]bool{
+		"backup": true, "delete": true,
+	})
+
+	reclaimed, err := l.Groups(ctx, ledger.GroupFilter{Verdict: ledger.VerdictReclaimed})
+	if err != nil {
+		t.Fatalf("Groups(reclaimed): %v", err)
+	}
+	requireSeeded(t, len(reclaimed) == 1, "reclaimed groups = %d, want 1", len(reclaimed))
+
+	logAllMutations(t, l)
+}
+
 // TestIntegrationApplyThenPrune is the first true end-to-end run of Apply and
 // Prune with Commit=true: it plans the stashdb.org duplicate pair the way
 // `custodian sync && custodian plan` would, quarantines the loser, checks

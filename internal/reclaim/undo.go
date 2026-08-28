@@ -32,9 +32,10 @@ type UndoOptions struct {
 
 // UndoReport is what one Undo run did, or would have done.
 type UndoReport struct {
-	DryRun bool
-	RunID  int64
-	Groups []UndoGroupReport
+	DryRun     bool
+	RunID      int64
+	Groups     []UndoGroupReport
+	Multifiles []MultifileUndoReport
 }
 
 // UndoGroupReport is one group's reversal: the keeper fields restored, each
@@ -68,17 +69,54 @@ type UndoLoserReport struct {
 	Errs     []string
 }
 
-// Counts summarises an UndoReport: groups restored, skipped, and failed.
+// MultifileUndoReport is one multifile group's reversal (REBUILD.md's Phase
+// 5b): every moved file back at its recorded path, and the scene's primary
+// file restored if apply changed it. No tag to remove and no union to
+// undo — multifile carries no metadata onto anything.
+type MultifileUndoReport struct {
+	Signature       string
+	SceneID         string
+	Skipped         bool
+	Reason          string
+	Moved           []UndoMovedFile
+	PrimaryRestored bool
+	Notes           []string
+	RestoredVerdict string
+	Errs            []string
+	Done            bool
+}
+
+// UndoMovedFile is one multifile file moved back out of quarantine.
+type UndoMovedFile struct {
+	FileID    string
+	MovedBack bool
+	// From is where the file sits now (in quarantine); To is where it is
+	// restored to (its recorded original path).
+	From     string
+	To       string
+	Sidecars []SidecarMove
+	Notes    []string
+	Errs     []string
+}
+
+// Counts summarises an UndoReport: groups restored, skipped, and failed —
+// tallying both the tag-and-union groups and the multifile ones together.
 func (r UndoReport) Counts() (done, skipped, failed int) {
-	for _, g := range r.Groups {
+	tally := func(skip bool, errs []string) {
 		switch {
-		case g.Skipped:
+		case skip:
 			skipped++
-		case len(g.Errs) > 0:
+		case len(errs) > 0:
 			failed++
 		default:
 			done++
 		}
+	}
+	for _, g := range r.Groups {
+		tally(g.Skipped, g.Errs)
+	}
+	for _, g := range r.Multifiles {
+		tally(g.Skipped, g.Errs)
 	}
 	return done, skipped, failed
 }
@@ -96,6 +134,9 @@ func (r UndoReport) String() string {
 
 	for _, g := range r.Groups {
 		writeUndoGroup(&b, g, r.DryRun)
+	}
+	for _, g := range r.Multifiles {
+		writeMultifileUndo(&b, g, r.DryRun)
 	}
 
 	done, skipped, failed := r.Counts()
@@ -152,6 +193,50 @@ func writeUndoGroup(b *strings.Builder, g UndoGroupReport, dryRun bool) {
 	b.WriteString("\n")
 }
 
+// writeMultifileUndo renders one multifile group's reversal: each file back
+// at its recorded path, and whether the scene's primary was restored.
+func writeMultifileUndo(b *strings.Builder, g MultifileUndoReport, dryRun bool) {
+	fmt.Fprintf(b, "group %s scene %s\n", shortSignature(g.Signature), g.SceneID)
+	if g.Skipped {
+		fmt.Fprintf(b, "  SKIPPED: %s\n\n", g.Reason)
+		return
+	}
+	for _, m := range g.Moved {
+		fmt.Fprintf(b, "  file %s\n", m.FileID)
+		fmt.Fprintf(b, "    move:    %s → %s\n", m.From, m.To)
+		for _, s := range m.Sidecars {
+			note := s.Note
+			if note == "" && !s.Done {
+				note = "planned"
+			}
+			fmt.Fprintf(b, "    sidecar: %s → %s", s.From, s.To)
+			if note != "" {
+				fmt.Fprintf(b, " (%s)", note)
+			}
+			b.WriteString("\n")
+		}
+		for _, n := range m.Notes {
+			fmt.Fprintf(b, "    note:    %s\n", n)
+		}
+		for _, e := range m.Errs {
+			fmt.Fprintf(b, "    ERROR:   %s\n", e)
+		}
+	}
+	if g.PrimaryRestored {
+		fmt.Fprintf(b, "  primary: %s\n", verb(dryRun, "restored", "would restore"))
+	}
+	for _, n := range g.Notes {
+		fmt.Fprintf(b, "  note:    %s\n", n)
+	}
+	if g.RestoredVerdict != "" {
+		fmt.Fprintf(b, "  verdict: %s %s\n", verb(dryRun, "restored to", "would restore to"), g.RestoredVerdict)
+	}
+	for _, e := range g.Errs {
+		fmt.Fprintf(b, "  ERROR: %s\n", e)
+	}
+	b.WriteString("\n")
+}
+
 // Undo reverses a live `quarantined` group's apply: untags each loser, moves
 // its file and sidecars back, and restores the keeper's recorded pre-union
 // values — read from the mutation log the applying run wrote, never from
@@ -184,6 +269,10 @@ func Undo(ctx context.Context, client *stash.Client, l *ledger.Ledger, opts Undo
 	}
 
 	for _, g := range groups {
+		if IsMultifileGroup(g) {
+			rep.Multifiles = append(rep.Multifiles, u.multifileGroup(ctx, g))
+			continue
+		}
 		rep.Groups = append(rep.Groups, u.group(ctx, g))
 	}
 	if u.runID != 0 {
@@ -346,7 +435,7 @@ func (u *undoer) loser(ctx context.Context, rows []ledger.Mutation, sceneID stri
 	}
 	lr.MovedBack = true
 
-	u.sidecarsBack(ctx, planned, &lr)
+	lr.Sidecars = u.resolveSidecars(ctx, planned)
 	return lr
 }
 
@@ -396,15 +485,17 @@ func (u *undoer) ensureTag(ctx context.Context, name string) (string, error) {
 	return id, nil
 }
 
-// sidecarsBack applies the planned companion-file moves after the video's
-// own move-back succeeded, and logs each one — the same shape applier.
-// sidecars uses forward.
-func (u *undoer) sidecarsBack(ctx context.Context, planned []sidecar.PlannedMove, lr *UndoLoserReport) {
-	for _, m := range planned {
-		lr.Sidecars = append(lr.Sidecars, SidecarMove{From: m.SrcStash, To: m.DstStash})
+// resolveSidecars applies the planned companion-file moves after the
+// video's own move-back succeeded, and logs each one — a dry run only
+// records the plan. Shared by a loser scene's restore (loser) and a
+// multifile file's restore (movedFileBack).
+func (u *undoer) resolveSidecars(ctx context.Context, planned []sidecar.PlannedMove) []SidecarMove {
+	out := make([]SidecarMove, len(planned))
+	for i, m := range planned {
+		out[i] = SidecarMove{From: m.SrcStash, To: m.DstStash}
 	}
 	if !u.opts.Commit || len(planned) == 0 {
-		return
+		return out
 	}
 
 	res := u.opts.Sidecars.Apply(ctx, planned)
@@ -419,12 +510,148 @@ func (u *undoer) sidecarsBack(ctx context.Context, planned []sidecar.PlannedMove
 		outcome[f.Move.SrcStash] = SidecarMove{From: f.Move.SrcStash, To: f.Move.DstStash, Note: f.Err.Error()}
 	}
 
-	for i, m := range lr.Sidecars {
+	for i, m := range out {
 		if got, ok := outcome[m.From]; ok {
-			lr.Sidecars[i] = got
+			out[i] = got
 		}
-		u.logSidecar(ctx, lr.Sidecars[i])
+		u.logSidecar(ctx, out[i])
 	}
+	return out
+}
+
+// multifileGroup reverses the multifile shape of apply (REBUILD.md's Phase
+// 5b): every moved file comes back to its recorded path, then the scene's
+// primary file is restored to whatever the applying run's "primary"
+// mutation recorded as From — the primary before that run touched it.
+// There is no tag to remove and no union to undo: multifile carries no
+// metadata onto anything, and the group's only scene is the one it acts on.
+func (u *undoer) multifileGroup(ctx context.Context, g ledger.Group) MultifileUndoReport {
+	gr := MultifileUndoReport{Signature: g.Signature}
+	if len(g.SceneIDs) != 1 {
+		gr.Skipped, gr.Reason = true, fmt.Sprintf("multifile group has %d scenes, want 1", len(g.SceneIDs))
+		return gr
+	}
+	sceneID := g.SceneIDs[0]
+	gr.SceneID = sceneID
+
+	if g.Verdict != ledger.VerdictQuarantined {
+		gr.Skipped, gr.Reason = true, fmt.Sprintf("verdict is %q, not quarantined — refusing to undo", g.Verdict)
+		return gr
+	}
+	if g.AppliedRun == 0 {
+		gr.Skipped, gr.Reason = true, "no applying run is recorded for this group"
+		return gr
+	}
+
+	rows, err := u.l.MutationsByRun(ctx, g.AppliedRun)
+	if err != nil {
+		gr.Errs = append(gr.Errs, err.Error())
+		return gr
+	}
+
+	sc, found, err := u.client.FindScene(ctx, sceneID)
+	switch {
+	case err != nil:
+		gr.Errs = append(gr.Errs, err.Error())
+		return gr
+	case !found:
+		gr.Skipped, gr.Reason = true, "scene is gone from Stash since it was quarantined"
+		return gr
+	}
+
+	for _, f := range sc.Files {
+		move, ok := findRow(rows, "move", "file "+f.ID)
+		if !ok {
+			continue // the file this group kept as primary — never moved
+		}
+		gr.Moved = append(gr.Moved, u.movedFileBack(ctx, sceneID, f, move))
+	}
+	for _, m := range gr.Moved {
+		gr.Errs = append(gr.Errs, m.Errs...)
+	}
+	if len(gr.Moved) == 0 {
+		gr.Skipped, gr.Reason = true, "no move mutation logged for this group's files"
+		return gr
+	}
+
+	if primaryRow, ok := findRow(rows, "primary", "scene "+sceneID); ok {
+		if err := u.restorePrimary(ctx, sceneID, primaryRow.To, primaryRow.From); err != nil {
+			gr.Errs = append(gr.Errs, err.Error())
+		} else {
+			gr.PrimaryRestored = true
+		}
+	} else {
+		gr.Notes = append(gr.Notes, "no primary mutation was logged — the scene's primary file needed no restoring")
+	}
+
+	if len(gr.Errs) > 0 {
+		return gr
+	}
+
+	gr.RestoredVerdict = restoredVerdict(g.Steps)
+	if u.opts.Commit {
+		if err := u.l.SetOutcome(ctx, g.Signature, gr.RestoredVerdict, 0); err != nil {
+			gr.Errs = append(gr.Errs, err.Error())
+			return gr
+		}
+	}
+	gr.Done = true
+	return gr
+}
+
+// movedFileBack reverses one multifile file's quarantine move: no tag to
+// remove — multifile never tags — just the file and its sidecars back to
+// where the move mutation recorded them.
+func (u *undoer) movedFileBack(ctx context.Context, sceneID string, f stash.File, move ledger.Mutation) UndoMovedFile {
+	mv := UndoMovedFile{FileID: f.ID, From: f.Path, To: move.From}
+	if f.Path != move.To {
+		mv.Notes = append(mv.Notes, fmt.Sprintf(
+			"file sits at %s, not where quarantine left it (%s) — restoring it anyway", f.Path, move.To))
+	}
+
+	if err := u.checkFree(ctx, move.From, sceneID); err != nil {
+		mv.Errs = append(mv.Errs, err.Error())
+		return mv
+	}
+
+	// Planned BEFORE the video moves back, mirroring Apply: afterwards the
+	// quarantine directory no longer holds the context to tell competing
+	// videos' sidecars apart.
+	planned, planErr := u.opts.Sidecars.Plan(ctx, f.Path, move.From)
+	if planErr != nil {
+		mv.Notes = append(mv.Notes, fmt.Sprintf("could not inspect sidecars: %v", planErr))
+	}
+	if u.opts.Sidecars == nil {
+		mv.Notes = append(mv.Notes, "sidecars: no library access configured, so subtitles beside this file stay where they are")
+	}
+
+	if err := u.do(ctx, ledger.Mutation{
+		Kind: "undo:move", Target: "file " + f.ID, From: f.Path, To: move.From, Note: "moveFiles",
+	}, func() error {
+		return u.client.MoveFiles(ctx, []string{f.ID},
+			stash.MoveTarget{Folder: pathmap.Dir(move.From), Basename: pathmap.Base(move.From)})
+	}); err != nil {
+		mv.Errs = append(mv.Errs, err.Error())
+		return mv
+	}
+	mv.MovedBack = true
+
+	mv.Sidecars = u.resolveSidecars(ctx, planned)
+	return mv
+}
+
+// restorePrimary sets the scene's primary file back to what it was before
+// apply changed it — the "primary" mutation's From value (REBUILD.md's
+// task: "record it in the mutation log from_value"). current is that same
+// mutation's To value, i.e. what is primary right now; an empty previous
+// means apply never changed the primary, so there is nothing to send.
+func (u *undoer) restorePrimary(ctx context.Context, sceneID, current, previous string) error {
+	if previous == "" {
+		return nil
+	}
+	return u.do(ctx, ledger.Mutation{
+		Kind: "undo:primary", Target: "scene " + sceneID, From: current, To: previous, Note: "SetPrimaryFile",
+	}, func() error { return u.client.SetPrimaryFile(ctx, sceneID, previous) })
 }
 
 func (u *undoer) logSidecar(ctx context.Context, m SidecarMove) {

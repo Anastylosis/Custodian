@@ -269,3 +269,28 @@ func TestChooseWiresOrganizeFiledForLocationTiebreak(t *testing.T) {
 		t.Errorf("formatPlanGroup output =\n%s\nwant a line reading location: filed vs not filed → 9904 wins", b.String())
 	}
 }
+
+func TestChooseLeavesMultifileGroupsToScan(t *testing.T) {
+	l := newPlanTestLedger(t)
+	ctx := context.Background()
+	insertSceneFile(t, l, "1", "/library/a.mp4", "a.mp4", 1_000_000, 1920, 1080, 5_000_000, "hevc")
+	runID, err := l.BeginRun(ctx, "scan", "")
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	step := ledger.Step{Rule: "file_choice", Outcome: "f1", Detail: "keep f1"}
+	g := ledger.Group{Signature: "solo", SceneIDs: []string{"1"}, Verdict: ledger.VerdictCertain, Steps: []ledger.Step{step}}
+	if err := l.ReplaceGroups(ctx, runID, []ledger.Group{g}); err != nil {
+		t.Fatalf("ReplaceGroups: %v", err)
+	}
+	if _, _, err := choose(ctx, l, []ledger.Group{g}, nil, &config.Config{}); err != nil {
+		t.Fatalf("choose: %v", err)
+	}
+	got, err := l.Groups(ctx, ledger.GroupFilter{Verdict: ledger.VerdictCertain})
+	if err != nil {
+		t.Fatalf("Groups: %v", err)
+	}
+	if len(got) != 1 || len(got[0].Steps) != 1 || got[0].Steps[0].Rule != "file_choice" {
+		t.Fatalf("file_choice step lost: %+v", got)
+	}
+}

@@ -17,6 +17,7 @@ type Report struct {
 	MistagTag     string
 	Backup        BackupStep
 	Groups        []GroupReport
+	Multifiles    []MultifileReport
 	Mistags       []MistagReport
 	// ChangesFile is where the append-only changes JSON landed, beside the
 	// backup (REBUILD.md §4.4's Reversal paragraph). Empty on a dry run, or
@@ -95,6 +96,39 @@ type SidecarMove struct {
 	Note string
 }
 
+// MultifileReport is one multifile group's outcome (REBUILD.md's Phase 5b):
+// the file kept as the scene's primary, and every other file in that same
+// scene moved to quarantine. No union, no tag — multifile is cleanup within
+// one scene, not a duplicate across two.
+type MultifileReport struct {
+	Signature string
+	SceneID   string
+	Skipped   bool
+	Reason    string
+	// Kept is the file id evidence.MultifileGenerator's file_choice step
+	// named as the survivor, and KeptPath where it lives.
+	Kept     string
+	KeptPath string
+	// PrimarySet is true when the chosen file was not already the scene's
+	// primary and SetPrimaryFile had to run.
+	PrimarySet bool
+	Moved      []MovedFile
+	Notes      []string
+	Errs       []string
+	Bytes      int64
+	Done       bool
+}
+
+// MovedFile is one multifile file's move into quarantine.
+type MovedFile struct {
+	FileID   string
+	From     string
+	To       string
+	Bytes    int64
+	Sidecars []SidecarMove
+	Notes    []string
+}
+
 // Counts summarises a Report: groups quarantined, skipped, failed, and the
 // bytes those quarantines make reclaimable once `prune` runs.
 func (r Report) Counts() (done, skipped, failed int, bytes int64) {
@@ -126,11 +160,34 @@ func (r Report) MistagCounts() (tagged, failed int) {
 	return tagged, failed
 }
 
+// MultifileCounts summarises the multifile groups: scenes cleaned up,
+// skipped, failed, and the bytes those moves make reclaimable once `prune`
+// runs.
+func (r Report) MultifileCounts() (done, skipped, failed int, bytes int64) {
+	for _, g := range r.Multifiles {
+		switch {
+		case g.Skipped:
+			skipped++
+		case len(g.Errs) > 0:
+			failed++
+		default:
+			done++
+			bytes += g.Bytes
+		}
+	}
+	return done, skipped, failed, bytes
+}
+
 // Summary is the one-line form recorded as the apply run's notes.
 func (r Report) Summary() string {
 	done, skipped, failed, bytes := r.Counts()
 	s := fmt.Sprintf("quarantined %d, skipped %d, failed %d, %s",
 		done, skipped, failed, confirm.HumanBytes(bytes))
+	if len(r.Multifiles) > 0 {
+		mdone, mskipped, mfailed, mbytes := r.MultifileCounts()
+		s += fmt.Sprintf("; multifile %d, skipped %d, failed %d, %s",
+			mdone, mskipped, mfailed, confirm.HumanBytes(mbytes))
+	}
 	if len(r.Mistags) > 0 {
 		tagged, mistagFailed := r.MistagCounts()
 		s += fmt.Sprintf("; mistagged %d groups, failed %d", tagged, mistagFailed)
@@ -159,6 +216,21 @@ func (r Report) String() string {
 	fmt.Fprintf(&b, "%s: %d groups, %s reclaimable once pruned\n", verb, done, confirm.HumanBytes(bytes))
 	fmt.Fprintf(&b, "skipped:    %d groups\n", skipped)
 	fmt.Fprintf(&b, "failed:     %d groups\n", failed)
+
+	if len(r.Multifiles) > 0 {
+		b.WriteString("\nmultifile:\n")
+		for _, g := range r.Multifiles {
+			writeMultifile(&b, g, r.DryRun)
+		}
+		mdone, mskipped, mfailed, mbytes := r.MultifileCounts()
+		mverb := "cleaned up"
+		if r.DryRun {
+			mverb = "would clean up"
+		}
+		fmt.Fprintf(&b, "%s: %d scenes, %s reclaimable once pruned\n", mverb, mdone, confirm.HumanBytes(mbytes))
+		fmt.Fprintf(&b, "skipped:    %d scenes\n", mskipped)
+		fmt.Fprintf(&b, "failed:     %d scenes\n", mfailed)
+	}
 
 	if len(r.Mistags) > 0 {
 		b.WriteString("\nmistags:\n")
@@ -261,6 +333,44 @@ func writeLoser(b *strings.Builder, l LoserReport, dryRun bool) {
 	for _, n := range l.Notes {
 		fmt.Fprintf(b, "    note:    %s\n", n)
 	}
+}
+
+// writeMultifile renders one multifile group's section: the file kept as
+// primary, every other file moved, and the bytes those moves reclaim.
+func writeMultifile(b *strings.Builder, g MultifileReport, dryRun bool) {
+	fmt.Fprintf(b, "group %s scene %s\n", shortSignature(g.Signature), g.SceneID)
+	if g.Skipped {
+		fmt.Fprintf(b, "  SKIPPED: %s\n\n", g.Reason)
+		return
+	}
+	fmt.Fprintf(b, "  keep:    %s (%s)\n", g.Kept, g.KeptPath)
+	if g.PrimarySet {
+		fmt.Fprintf(b, "  primary: %s file %s\n", verb(dryRun, "set", "would set"), g.Kept)
+	}
+	for _, m := range g.Moved {
+		fmt.Fprintf(b, "  move:    %s (%s) → %s\n", m.From, confirm.HumanBytes(m.Bytes), m.To)
+		for _, s := range m.Sidecars {
+			note := s.Note
+			if note == "" && !s.Done {
+				note = "planned"
+			}
+			fmt.Fprintf(b, "    sidecar: %s → %s", s.From, s.To)
+			if note != "" {
+				fmt.Fprintf(b, " (%s)", note)
+			}
+			b.WriteString("\n")
+		}
+		for _, n := range m.Notes {
+			fmt.Fprintf(b, "    note:    %s\n", n)
+		}
+	}
+	for _, n := range g.Notes {
+		fmt.Fprintf(b, "  note: %s\n", n)
+	}
+	for _, e := range g.Errs {
+		fmt.Fprintf(b, "  ERROR: %s\n", e)
+	}
+	fmt.Fprintf(b, "  reclaimable: %s\n\n", confirm.HumanBytes(g.Bytes))
 }
 
 func writeMistag(b *strings.Builder, m MistagReport, tag string, dryRun bool) {

@@ -94,6 +94,9 @@ func choose(ctx context.Context, l *ledger.Ledger, groups []ledger.Group, files 
 	var total int64
 
 	for i := range groups {
+		if len(groups[i].SceneIDs) < 2 {
+			continue // a multifile group: scan already chose the file to keep
+		}
 		gr := rules
 		if groups[i].Verdict == ledger.VerdictPartial {
 			gr.Eligible = evidence.CompleteSceneIDs(groups[i])

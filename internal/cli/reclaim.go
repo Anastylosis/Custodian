@@ -104,11 +104,12 @@ func confirmApply(ctx context.Context, cmd *cobra.Command, l *ledger.Ledger, lim
 			return false, err
 		}
 		for _, g := range groups {
-			if g.Keeper == "" {
+			multifile := reclaim.IsMultifileGroup(g)
+			if !multifile && g.Keeper == "" {
 				continue
 			}
 			summary.GroupCount++
-			summary.SceneCount += len(g.SceneIDs) - 1
+			summary.SceneCount += multifileSceneCount(g, multifile)
 			summary.ReclaimableBytes += g.Reclaimable
 			if limit > 0 && summary.GroupCount == limit {
 				break
@@ -116,6 +117,18 @@ func confirmApply(ctx context.Context, cmd *cobra.Command, l *ledger.Ledger, lim
 		}
 	}
 	return confirm.PromptYES(cmd.InOrStdin(), cmd.OutOrStdout(), summary, flagApplyYes)
+}
+
+// multifileSceneCount is how many "scenes" a group's quarantine touches for
+// the YES-prompt summary: every loser scene for a normal group, zero for a
+// multifile one — no scene disappears, only files within the one it already
+// has (`plan` never sets Keeper on these, so they need the flag rather than
+// the usual Keeper check).
+func multifileSceneCount(g ledger.Group, multifile bool) int {
+	if multifile {
+		return 0
+	}
+	return len(g.SceneIDs) - 1
 }
 
 var (

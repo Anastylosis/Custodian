@@ -21,8 +21,19 @@ type ChangeEntry struct {
 	Keeper    string                 `json:"keeper"`
 	Union     map[string]FieldChange `json:"union,omitempty"`
 	Losers    []LoserChange          `json:"losers,omitempty"`
-	Merged    []string               `json:"merged,omitempty"`
-	Deleted   []string               `json:"deleted,omitempty"`
+	// Files is a multifile group's moved files: no losers, no union — the
+	// group's only scene (Keeper) is the one that changed, by losing every
+	// file but the one it kept (REBUILD.md's Phase 5b).
+	Files   []FileChange `json:"files,omitempty"`
+	Merged  []string     `json:"merged,omitempty"`
+	Deleted []string     `json:"deleted,omitempty"`
+}
+
+// FileChange is one multifile file's move into or out of quarantine.
+type FileChange struct {
+	ID   string `json:"id"`
+	From string `json:"from"`
+	To   string `json:"to"`
 }
 
 // FieldChange is one field's value before and after a union.
@@ -114,11 +125,23 @@ func changeEntriesFromReport(rep Report, at string) []ChangeEntry {
 		}
 		out = append(out, ce)
 	}
+	for _, g := range rep.Multifiles {
+		if !g.Done {
+			continue
+		}
+		ce := ChangeEntry{Signature: g.Signature, RunID: rep.RunID, At: at, Keeper: g.SceneID}
+		for _, m := range g.Moved {
+			ce.Files = append(ce.Files, FileChange{ID: m.FileID, From: m.From, To: m.To})
+		}
+		out = append(out, ce)
+	}
 	return out
 }
 
 // pruneChangeEntries builds one ChangeEntry per fully-pruned group — the
-// scene ids merged into the keeper and the file ids deleted from disk.
+// scene ids merged into the keeper and the file ids deleted from disk. A
+// multifile group merges nothing (its group is one scene), so Merged stays
+// empty for it; Deleted is still the file ids removed from disk.
 func pruneChangeEntries(rep PruneReport, at string) []ChangeEntry {
 	var out []ChangeEntry
 	for _, g := range rep.Groups {
@@ -127,7 +150,9 @@ func pruneChangeEntries(rep PruneReport, at string) []ChangeEntry {
 		}
 		ce := ChangeEntry{Signature: g.Signature, RunID: rep.RunID, At: at, Keeper: g.Keeper}
 		for _, l := range g.Losers {
-			ce.Merged = append(ce.Merged, l.SceneID)
+			if !g.Multifile {
+				ce.Merged = append(ce.Merged, l.SceneID)
+			}
 			ce.Deleted = append(ce.Deleted, l.FileID)
 		}
 		out = append(out, ce)
