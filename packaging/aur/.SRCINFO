@@ -1,0 +1,14 @@
+pkgbase = custodian
+	pkgdesc = Finds and resolves duplicate video scenes in a Stash library
+	pkgver = VERSION
+	pkgrel = 1
+	url = https://github.com/Anastylosis/Custodian
+	arch = x86_64
+	arch = aarch64
+	license = GPL-3.0-only
+	makedepends = go>=1.25
+	depends = glibc
+	source = custodian-VERSION.tar.gz::https://github.com/Anastylosis/Custodian/archive/vVERSION.tar.gz
+	sha256sums = SKIP
+
+pkgname = custodian

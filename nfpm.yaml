@@ -1,0 +1,12 @@
+name: custodian
+arch: ${GOARCH}
+platform: linux
+version: ${VERSION}
+maintainer: Wasylq <wasylq@protonmail.com>
+description: Finds and resolves duplicate video scenes in a Stash library
+vendor: Wasylq
+homepage: https://github.com/Anastylosis/Custodian
+license: GPL-3.0-only
+contents:
+  - src: dist/custodian
+    dst: /usr/bin/custodian

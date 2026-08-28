@@ -116,7 +116,29 @@ See [MANUAL.md](MANUAL.md) for usage instructions and
 
 ## Install
 
-**Option A: Download a release binary** (no Go required)
+**Option A: Homebrew** (macOS and Linux)
+
+```sh
+brew install anastylosis/tap/custodian
+```
+
+**Option B: Linux packages**
+
+```sh
+# Arch Linux (AUR)
+yay -S custodian
+
+# Debian / Ubuntu
+sudo dpkg -i custodian_*_amd64.deb
+
+# Fedora / RHEL
+sudo rpm -i custodian_*_amd64.rpm
+```
+
+`.deb`/`.rpm` are attached to each
+[release](https://github.com/Anastylosis/Custodian/releases).
+
+**Option C: Download a release binary** (no Go required)
 
 Go to the [Releases](https://github.com/Anastylosis/Custodian/releases)
 page, download the archive for your platform, and extract:
@@ -133,7 +155,7 @@ chmod +x custodian
 # Windows — extract the .zip, you get custodian.exe
 ```
 
-**Option B: Build from source** (requires Go 1.22+)
+**Option D: Build from source** (requires Go 1.22+)
 
 ```sh
 git clone https://github.com/Anastylosis/Custodian.git
@@ -141,7 +163,7 @@ cd Custodian
 go build -o custodian ./cmd/custodian
 ```
 
-**Option C: `go install`**
+**Option E: `go install`**
 
 ```sh
 go install github.com/Anastylosis/Custodian/cmd/custodian@latest

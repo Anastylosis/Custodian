@@ -13,8 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  # No nfpm, aur or docker: Custodian ships binaries only — it has no
-  # Dockerfile and no packaging/ directory.
+  # No docker: Custodian has no Dockerfile.
   release:
     uses: Anastylosis/.github/.github/workflows/go-release.yml@v1
     permissions:
@@ -26,8 +25,30 @@ jobs:
     with:
       binary-name: custodian
       main-package: ./cmd/custodian
+      nfpm: true
+      aur: true
+      aur-pkgname: custodian
+      aur-commit-username: Wasylq
+      aur-commit-email: wasylq@protonmail.com
+      # Needs HOMEBREW_TAP_SSH_KEY — a write deploy key on the tap repo, held
+      # as an org secret. GITHUB_TOKEN is scoped to this repository and cannot
+      # write to another; a deploy key never expires, so nothing to rotate.
+      homebrew: true
+      homebrew-tap: Anastylosis/homebrew-tap
+      # No environment-name/environment-url: Custodian has no manual smoke
+      # gate — CI's Stash integration job replaces it. See CONTRIBUTING.md.
+
+      # The category must already exist; renaming it on GitHub without
+      # changing it here fails the API call after the binaries are built.
+      discussion-category: Announcements
       install-instructions: |
-        Download the binary for your platform, extract, and run:
+        ### Homebrew (macOS and Linux)
+
+        ```sh
+        brew install anastylosis/tap/custodian
+        ```
+
+        Or download the binary for your platform, extract, and place it on your PATH:
 
         ```sh
         # Linux (amd64)
@@ -39,6 +60,19 @@ jobs:
         tar xzf custodian-${{ github.ref_name }}-darwin-arm64.tar.gz
         chmod +x custodian
         ./custodian config init
+        ```
+
+        ### Linux packages
+
+        ```sh
+        # Arch Linux (AUR)
+        yay -S custodian
+
+        # Debian / Ubuntu
+        sudo dpkg -i custodian_*_amd64.deb
+
+        # Fedora / RHEL
+        sudo rpm -i custodian_*_amd64.rpm
         ```
 
         Or build from source:

@@ -1,0 +1,28 @@
+# Maintainer: Wasylq <wasylq@protonmail.com>
+pkgname=custodian
+pkgver=VERSION
+pkgrel=1
+pkgdesc='Finds and resolves duplicate video scenes in a Stash library'
+arch=('x86_64' 'aarch64')
+url='https://github.com/Anastylosis/Custodian'
+license=('GPL-3.0-only')
+depends=('glibc')
+makedepends=('go>=1.25')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/Anastylosis/Custodian/archive/v${pkgver}.tar.gz")
+# The real sha256 is populated by `updpkgsums` in the release workflow before
+# the package is committed to AUR — see .github/workflows/release.yml. The
+# 'SKIP' placeholder lets makepkg parse the file locally without the source.
+sha256sums=('SKIP')
+
+build() {
+  cd "Custodian-${pkgver}"
+  export CGO_ENABLED=0
+  go build -ldflags "-s -w -X main.version=v${pkgver} -X main.commit=aur -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o custodian ./cmd/custodian
+}
+
+package() {
+  cd "Custodian-${pkgver}"
+  install -Dm755 custodian "${pkgdir}/usr/bin/custodian"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

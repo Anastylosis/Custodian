@@ -5,8 +5,10 @@
 Releases are tagged `vMAJOR.MINOR.PATCH`. Pushing the tag runs
 [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds
 `custodian` for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 and
-windows/amd64, publishes them with a `SHA256SUMS` file and a build-provenance
-attestation, and writes the release notes from the commit log.
+windows/amd64, packages `.deb`/`.rpm` for linux/amd64+arm64, publishes them
+with a `SHA256SUMS` file and a build-provenance attestation, publishes to the
+AUR and to the `anastylosis/homebrew-tap` Homebrew tap, opens a linked
+Discussion, and writes the release notes from the commit log.
 
 ```bash
 git tag -a v0.4.0 -m "v0.4.0"
@@ -23,10 +25,33 @@ Re-run `custodian scan` after upgrading; cached listings from v0.4.0 are
 still valid."
 ```
 
-**Binaries only.** There is no `nfpm.yaml`, no AUR package and no Dockerfile,
-so the release ships archives and nothing else. `go install
-github.com/Anastylosis/Custodian/cmd/custodian@vX.Y.Z` is the other supported
-route.
+### What the release produces
+
+| Artifact | Platforms |
+|---|---|
+| `.tar.gz` binaries | linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 |
+| `.zip` binary | windows/amd64 |
+| `.deb` / `.rpm` | linux/amd64, linux/arm64 |
+| AUR `custodian` package | auto-published after release |
+| Homebrew (`anastylosis/homebrew-tap`) | macOS + Linux, arm64 + amd64 |
+
+No Dockerfile, so there is no image.
+
+### AUR and Homebrew
+
+Packaging files live in `packaging/`:
+
+- `packaging/aur/PKGBUILD` — published to the AUR automatically after the
+  release (via `KSXGitHub/github-actions-deploy-aur`). Needs
+  `AUR_SSH_PRIVATE_KEY`. `packaging/aur/gen-srcinfo.sh --check` runs in CI to
+  catch `.SRCINFO` drift.
+- `packaging/homebrew/custodian.rb` — a template the release workflow renders
+  into [`anastylosis/homebrew-tap`](https://github.com/Anastylosis/homebrew-tap)
+  as `Formula/custodian.rb`, substituting the version and checksums. Needs
+  `HOMEBREW_TAP_SSH_KEY`, a write deploy key on the tap repo.
+
+`go install github.com/Anastylosis/Custodian/cmd/custodian@vX.Y.Z` still works
+as a source-based alternative.
 
 ### There is no approval gate, and that is deliberate
 
