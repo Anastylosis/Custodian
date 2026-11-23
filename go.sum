@@ -1,7 +1,7 @@
 github.com/Anastylosis/stash-go v0.9.0 h1:7U9ic2dO6Elbytk03nWv5+mboMjAdRDFsmdccLQjF4c=
 github.com/Anastylosis/stash-go v0.9.0/go.mod h1:tRUVKaZav6YB9IakMH34N9/F7Dzks1KW80d4d793k64=
-github.com/Anastylosis/subtitlematch v0.1.0 h1:2kpWqRY+4HXF9oPdqD6w3bMmihLh7q06NVGcFyrLKR0=
-github.com/Anastylosis/subtitlematch v0.1.0/go.mod h1:0YKmaHxxYAp8P+aPlnXMgaZoNMnPOM0C5QGu0u6f5d0=
+github.com/Anastylosis/subtitlematch v0.2.0 h1:0JGExIni1N+hBzPrQ+4Ak7j3fOy/jM//OGRgIw902Qw=
+github.com/Anastylosis/subtitlematch v0.2.0/go.mod h1:0YKmaHxxYAp8P+aPlnXMgaZoNMnPOM0C5QGu0u6f5d0=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/charmbracelet/bubbletea v1.3.10 h1:otUDHWMMzQSB0Pkc87rm691KZ3SWa4KUlvF9nRvCICw=
